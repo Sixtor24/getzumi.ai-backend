@@ -11,9 +11,9 @@ const envSchema = z.object({
 
   REDIS_URL: z.string().min(1),
 
-  AWS_REGION: z.string().min(1),
-  AWS_ACCESS_KEY_ID: z.string().optional(),
-  AWS_SECRET_ACCESS_KEY: z.string().optional(),
+  S3_AWS_REGION: z.string().min(1),
+  S3_AWS_ACCESS_KEY_ID: z.string().optional(),
+  S3_AWS_SECRET_ACCESS_KEY: z.string().optional(),
   S3_BUCKET: z.string().min(1),
 
   REPLICATE_API_TOKEN: z.string().optional(),

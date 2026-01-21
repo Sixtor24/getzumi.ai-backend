@@ -1,5 +1,15 @@
+interface GenerateImageResult {
+  success: boolean;
+  data?: Buffer;
+  error?: string;
+}
+
 export class GeminiImageService {
-  constructor(apiKey) {
+  private apiKey: string;
+  private apiUrl: string;
+  private headers: HeadersInit;
+
+  constructor(apiKey: string) {
     this.apiKey = apiKey;
     this.apiUrl = "https://api.apiyi.com/v1/chat/completions";
     this.headers = {
@@ -8,7 +18,7 @@ export class GeminiImageService {
     };
   }
 
-  async generateImageBytes(prompt, model) {
+  async generateImageBytes(prompt: string, model: string): Promise<GenerateImageResult> {
     const payload = {
       model: model,
       stream: false,
@@ -27,7 +37,8 @@ export class GeminiImageService {
         return { success: false, error: `API error: ${response.status} - ${errorText}` };
       }
 
-      const result = await response.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result: any = await response.json();
       const content = result.choices?.[0]?.message?.content;
 
       if (!content) {
@@ -46,7 +57,11 @@ export class GeminiImageService {
       return { success: true, data: imageBuffer };
 
     } catch (error) {
-      return { success: false, error: error.message };
+       let errorMessage = "Unknown error";
+       if (error instanceof Error) {
+           errorMessage = error.message;
+       }
+      return { success: false, error: errorMessage };
     }
   }
 }

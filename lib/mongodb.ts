@@ -1,15 +1,20 @@
-import { MongoClient } from 'mongodb';
+import { MongoClient, MongoClientOptions } from 'mongodb';
 
-const uri = process.env.MONGO_DB_URI;
-const options = {
+const uri = process.env.MONGO_DB_URI || "";
+const options: MongoClientOptions = {
   appName: "zumidb",
 };
 
-let client;
-let clientPromise;
+let client: MongoClient;
+let clientPromise: Promise<MongoClient>;
 
-if (!uri) {
+if (!process.env.MONGO_DB_URI) {
   throw new Error('Please add your Mongo URI to .env');
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
 
 if (process.env.NODE_ENV === 'development') {

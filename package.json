@@ -14,5 +14,10 @@
     "react": "^18",
     "react-dom": "^18",
     "sharp": "^0.33.2"
+  },
+  "devDependencies": {
+    "@types/node": "25.0.9",
+    "@types/react": "19.2.9",
+    "typescript": "5.9.3"
   }
 }

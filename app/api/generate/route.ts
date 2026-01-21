@@ -1,12 +1,18 @@
-import { NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb';
-import { GeminiImageService } from '@/lib/gemini';
+import { NextRequest, NextResponse } from 'next/server';
+import clientPromise from '../../../lib/mongodb';
+import { GeminiImageService } from '../../../lib/gemini';
 import sharp from 'sharp';
 import { Binary } from 'mongodb';
 
-export async function POST(request) {
+interface GenerateRequestBody {
+    prompt: string;
+    model?: string;
+}
+
+export async function POST(request: NextRequest) {
   try {
-    const { prompt, model = "nano-banana-pro" } = await request.json();
+    const body: GenerateRequestBody = await request.json();
+    const { prompt, model = "gemini-3-pro-image-preview" } = body;
 
     const apiKey = process.env.APIYI_API_KEY;
     if (!apiKey) {
@@ -17,7 +23,7 @@ export async function POST(request) {
     const service = new GeminiImageService(apiKey);
     const result = await service.generateImageBytes(prompt, model);
 
-    if (!result.success) {
+    if (!result.success || !result.data) {
       return NextResponse.json({ success: false, message: result.error }, { status: 502 });
     }
 
@@ -54,6 +60,7 @@ export async function POST(request) {
 
   } catch (error) {
     console.error(error);
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+    const msg = error instanceof Error ? error.message : "Start Error";
+    return NextResponse.json({ success: false, message: msg }, { status: 500 });
   }
 }

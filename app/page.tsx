@@ -1,0 +1,139 @@
+'use client';
+
+import { useState } from 'react';
+
+interface ApiResult {
+  success: boolean;
+  message?: string;
+  view_url?: string;
+  image_id?: string;
+  [key: string]: unknown;
+}
+
+export default function Home() {
+  const [prompt, setPrompt] = useState<string>('');
+  const [model, setModel] = useState<string>('nano-banana-pro');
+  const [loading, setLoading] = useState<boolean>(false);
+  const [result, setResult] = useState<ApiResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prompt, model }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Error generating image');
+      }
+
+      setResult(data);
+    } catch (err: unknown) {
+        let msg = "Unknown error";
+        if (err instanceof Error) msg = err.message;
+        setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main style={{ maxWidth: '800px', margin: '40px auto', padding: '20px', background: 'white', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+      <h1 style={{ borderBottom: '2px solid #eaeaea', paddingBottom: '10px', marginBottom: '20px' }}>
+        🧪 Getzumi AI Endpoint Tester
+      </h1>
+
+      <div style={{ border: '1px solid #ddd', borderRadius: '6px', padding: '20px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
+          <span style={{ background: '#0070f3', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold', marginRight: '10px' }}>POST</span>
+          <code style={{ background: '#f5f5f5', padding: '2px 6px', borderRadius: '4px' }}>/api/generate</code>
+        </div>
+        
+        <p style={{ color: '#666', marginBottom: '15px', fontSize: '14px' }}>
+          Genera una imagen basada en un prompt de texto utilizando el modelo Gemini seleccionado. La imagen se guarda en MongoDB y se retorna una URL para visualizarla.
+        </p>
+
+        <form onSubmit={handleGenerate}>
+          <div style={{ marginBottom: '15px' }}>
+            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>Prompt:</label>
+            <textarea 
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="Ej: A futuristic cat wearing sunglasses..."
+              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', minHeight: '80px', fontFamily: 'inherit' }}
+              required
+            />
+          </div>
+
+          <div style={{ marginBottom: '15px' }}>
+            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>Model:</label>
+            <select 
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', background: 'white' }}
+            >
+              <option value="nano-banana-pro">nano-banana-pro</option>
+            </select>
+          </div>
+
+          <button 
+            type="submit" 
+            disabled={loading}
+            style={{ 
+              background: loading ? '#ccc' : '#0070f3', 
+              color: 'white', 
+              border: 'none', 
+              padding: '10px 20px', 
+              borderRadius: '5px', 
+              cursor: loading ? 'not-allowed' : 'pointer',
+              fontWeight: 'bold',
+              fontSize: '16px'
+            }}
+          >
+            {loading ? 'Generando...' : '🚀 Generar Imagen'}
+          </button>
+        </form>
+      </div>
+
+      {error && (
+        <div style={{ background: '#fff2f2', border: '1px solid #ffcccc', color: '#cc0000', padding: '15px', borderRadius: '6px', marginBottom: '20px' }}>
+          <strong>Error:</strong> {error}
+        </div>
+      )}
+
+      {result && (
+        <div style={{ background: '#f9fff9', border: '1px solid #ccffcc', padding: '20px', borderRadius: '6px' }}>
+          <h3 style={{ marginTop: 0, color: '#006600' }}>✅ Resultado:</h3>
+          <div style={{ background: '#eee', padding: '10px', borderRadius: '4px', overflowX: 'auto', marginBottom: '15px' }}>
+            <pre style={{ margin: 0, fontSize: '12px' }}>{JSON.stringify(result, null, 2)}</pre>
+          </div>
+          
+          {result.view_url && (
+            <div style={{ textAlign: 'center', marginTop: '20px' }}>
+              <p style={{ fontWeight: 'bold', marginBottom: '10px' }}>Vista Previa:</p>
+              <a href={result.view_url} target="_blank" rel="noopener noreferrer">
+                 {/* eslint-disable-next-line @next/next/no-img-element */}
+                 <img 
+                  src={result.view_url} 
+                  alt="Generada" 
+                  style={{ maxWidth: '100%', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }} 
+                />
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+    </main>
+  );
+}

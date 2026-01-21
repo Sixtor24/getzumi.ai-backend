@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb';
+import { NextRequest, NextResponse } from 'next/server';
+import clientPromise from '../../../../lib/mongodb';
 import { ObjectId } from 'mongodb';
 
-export async function GET(request, { params }) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const { id } = params;
 
@@ -20,9 +20,10 @@ export async function GET(request, { params }) {
       return new NextResponse("Image not found", { status: 404 });
     }
 
-    // doc.image_data is a BSON Binary, access the buffer via .buffer or .read() depending on version
-    // The driver usually returns a Binary object which has a buffer property
-    const buffer = doc.image_data.buffer; 
+    // doc.image_data is a BSON Binary
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const binaryData: any = doc.image_data;
+    const buffer = binaryData.buffer || binaryData.read(0, binaryData.length());
 
     return new NextResponse(buffer, {
       status: 200,

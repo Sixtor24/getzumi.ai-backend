@@ -7,12 +7,13 @@ import { Binary } from 'mongodb';
 interface GenerateRequestBody {
     prompt: string;
     model?: string;
+    input_images?: string[];
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body: GenerateRequestBody = await request.json();
-    const { prompt, model = "gemini-3-pro-image-preview" } = body;
+    const { prompt, model = "gemini-3-pro-image-preview", input_images = [] } = body;
 
     const apiKey = process.env.APIYI_API_KEY;
     if (!apiKey) {
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
 
     // 1. Generate Image
     const service = new GeminiImageService(apiKey);
-    const result = await service.generateImageBytes(prompt, model);
+    const result = await service.generateImageBytes(prompt, model, input_images);
 
     if (!result.success || !result.data) {
       return NextResponse.json({ success: false, message: result.error }, { status: 502 });
@@ -37,10 +38,18 @@ export async function POST(request: NextRequest) {
     const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
     const collection = db.collection("generated_images");
 
+    // Process input images for storage
+    const storedInputImages = input_images.map(imgStr => {
+      // Remove data URL prefix if present to get clean base64
+      const base64Data = imgStr.replace(/^data:image\/\w+;base64,/, "");
+      return new Binary(Buffer.from(base64Data, 'base64'));
+    });
+
     const doc = {
       prompt,
       model,
       image_data: new Binary(compressedBuffer),
+      input_images: storedInputImages,
       content_type: "image/jpeg",
       created_at: new Date(),
     };

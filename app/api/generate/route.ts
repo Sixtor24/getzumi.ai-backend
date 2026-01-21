@@ -48,7 +48,8 @@ export async function POST(request: NextRequest) {
     const insertResult = await collection.insertOne(doc);
     const imageId = insertResult.insertedId.toString();
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    // Obtener la URL base dinámicamente desde la solicitud (funciona en localhost y en Netlify automáticamente)
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin;
     const viewUrl = `${baseUrl}/api/view/${imageId}`;
 
     return NextResponse.json({

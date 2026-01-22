@@ -1,3 +1,4 @@
+
 interface GenerateImageResult {
   success: boolean;
   data?: Buffer;
@@ -7,7 +8,7 @@ interface GenerateImageResult {
 export class GeminiImageService {
   private apiKey: string;
   private apiUrl: string;
-  private headers: HeadersInit;
+  private headers: any; // Axios headers
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
@@ -66,7 +67,8 @@ export class GeminiImageService {
             prompt: prompt,
             n: 1,
             size: "1024x1024", // Default safe size
-            response_format: "b64_json"
+            response_format: "b64_json",
+            watermark: false // Solicitar sin marca de agua
         };
         // Note: seedream docs show input "size" can be "2K", "4K", or "2048x2048". "1024x1024" should work or be close to 1K.
         if (model.includes('seedream-4-5') || model.includes('seedream-4-0')) {
@@ -80,6 +82,7 @@ export class GeminiImageService {
     try {
       console.log(`[GeminiService] Generating with ${model} at ${currentApiUrl}`);
       
+      // Use standard fetch here
       const response = await fetch(currentApiUrl, {
         method: "POST",
         headers: this.headers,

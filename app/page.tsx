@@ -22,6 +22,8 @@ export default function Home() {
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(0);
 
+
+
   // Drag handlers
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -83,6 +85,8 @@ export default function Home() {
     }, 500);
     return interval;
   };
+
+
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -298,6 +302,5 @@ export default function Home() {
           )}
         </div>
       )}
-    </main>
-  );
-}
+  </main>
+  )}

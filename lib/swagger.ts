@@ -6,7 +6,7 @@ const options = {
     info: {
       title: 'Getzumi AI API',
       version: '1.0.0',
-      description: 'API for generating and saving AI images',
+      description: 'API for getzumi.ai',
     },
     servers: [
       {
@@ -14,7 +14,7 @@ const options = {
         description: 'Development Server',
       },
       {
-        url: 'https://getzumi.ai',
+        url: 'https://getzumiai-backend.vercel.app/',
         description: 'Production Server',
       }
     ],
@@ -29,6 +29,149 @@ const swaggerSpec = swaggerJsdoc(options);
 // Manual path definitions to ensure they are correct without relying on comment parsing in TS files
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (swaggerSpec as any).paths = {
+  '/api/auth/signup': {
+    post: {
+      summary: 'Register a new user',
+      description: 'Creates a new user account if username and email do not exist.',
+      tags: ['Authentication'],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['fullName', 'username', 'email', 'password'],
+              properties: {
+                fullName: { type: 'string', example: 'John Doe' },
+                username: { type: 'string', example: 'johndoe123' },
+                email: { type: 'string', format: 'email', example: 'john@example.com' },
+                password: { type: 'string', format: 'password', example: 'securePassword123' },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        201: {
+          description: 'User registered successfully',
+          headers: {
+            'Set-Cookie': {
+              description: 'Session cookie (auth_token)',
+              schema: { type: 'string' }
+            }
+          },
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean' },
+                  message: { type: 'string' },
+                  token: { type: 'string', description: 'JWT Session Token' },
+                  user: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      username: { type: 'string' },
+                      email: { type: 'string' },
+                      fullName: { type: 'string' },
+                    }
+                  }
+                },
+              },
+            },
+          },
+        },
+        409: { description: 'Username or Email already exists' },
+      },
+    },
+  },
+  '/api/auth/signin': {
+    post: {
+      summary: 'User Login',
+      description: 'Authenticates a user via Username OR Email + Password.',
+      tags: ['Authentication'],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['identifier', 'password'],
+              properties: {
+                identifier: { 
+                  type: 'string', 
+                  description: 'Username or Email address',
+                  example: 'john@example.com' 
+                },
+                password: { 
+                    type: 'string', 
+                    format: 'password', 
+                    example: 'securePassword123' 
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: 'Login successful',
+          headers: {
+            'Set-Cookie': {
+              description: 'Session cookie (auth_token)',
+              schema: { type: 'string' }
+            }
+          },
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean' },
+                  message: { type: 'string' },
+                  token: { type: 'string', description: 'JWT Session Token' },
+                  user: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      username: { type: 'string' },
+                      email: { type: 'string' },
+                      fullName: { type: 'string' },
+                    }
+                  }
+                },
+              },
+            },
+          },
+        },
+        401: { description: 'Invalid credentials' },
+      },
+    },
+  },
+  '/api/auth/signout': {
+    post: {
+      summary: 'User Logout',
+      description: 'Invalidates the user session by clearing the auth cookie.',
+      tags: ['Authentication'],
+      responses: {
+        200: {
+          description: 'Logged out successfully',
+          content: {
+             'application/json': {
+                 schema: {
+                     type: 'object',
+                     properties: {
+                         success: { type: 'boolean' },
+                         message: { type: 'string' }
+                     }
+                 }
+             }
+          }
+        },
+      },
+    },
+  },
   '/api/generate': {
     post: {
       summary: 'Generate image candidates',

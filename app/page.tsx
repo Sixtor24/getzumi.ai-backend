@@ -2,16 +2,32 @@
 
 import { useState } from 'react';
 
+import Script from 'next/script';
+
 interface ApiResult {
   success: boolean;
   message?: string;
   candidates?: string[];
   view_url?: string;
   image_id?: string;
+  audio_id?: string;
   [key: string]: unknown;
 }
 
+declare const puter: any;
+
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<'image' | 'audio'>('image');
+  
+  // Audio State
+  const [audioMode, setAudioMode] = useState<'tts' | 's2s'>('tts');
+  const [audioProvider, setAudioProvider] = useState<'elevenlabs' | 'cartesia'>('elevenlabs');
+  const [audioText, setAudioText] = useState('');
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [audioResult, setAudioResult] = useState<{ view_url: string } | null>(null);
+  const [audioLoading, setAudioLoading] = useState(false);
+
+  // Image State
   const [prompt, setPrompt] = useState<string>('');
   const [model, setModel] = useState<string>('nano-banana-pro');
   const [loading, setLoading] = useState<boolean>(false);
@@ -37,6 +53,7 @@ export default function Home() {
   
   // Gallery State
   const [myImages, setMyImages] = useState<any[]>([]);
+  const [myAudios, setMyAudios] = useState<any[]>([]);
   const [showGallery, setShowGallery] = useState<boolean>(false);
   const [galleryLoading, setGalleryLoading] = useState<boolean>(false);
 
@@ -93,9 +110,25 @@ export default function Home() {
     }
   };
 
+  const fetchMyAudios = async () => {
+    setGalleryLoading(true);
+    try {
+      const res = await fetch('/api/my-audios');
+      const data = await res.json();
+      if (data.success) {
+        setMyAudios(data.audios);
+      }
+    } catch (e) {
+        console.error("Error fetching audios", e);
+    } finally {
+        setGalleryLoading(false);
+    }
+  };
+
   const toggleGallery = () => {
     if (!showGallery) {
-      fetchMyImages();
+      if (activeTab === 'image') fetchMyImages();
+      else fetchMyAudios();
     }
     setShowGallery(!showGallery);
   };
@@ -213,6 +246,112 @@ export default function Home() {
     }
   };
 
+
+  const handleAudioGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) {
+        setError("Debes iniciar sesión");
+        return;
+    }
+    setAudioLoading(true);
+    setAudioResult(null);
+    setError(null);
+
+    try {
+        if (audioMode === 'tts') {
+            if (audioProvider === 'cartesia') {
+                // Server-side Cartesia
+                const res = await fetch('/api/tts/cartesia', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: audioText })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message || 'Error generating audio');
+                setAudioResult({ view_url: data.view_url });
+            } else {
+                // Client-side Puter (ElevenLabs)
+                // @ts-ignore
+                if (typeof puter === 'undefined') throw new Error("Puter.js not loaded");
+                const audio = await puter.ai.txt2speech(audioText, {
+                    provider: 'elevenlabs',
+                    model: 'eleven_multilingual_v2',
+                    voice: '21m00Tcm4TlvDq8ikWAM' // Rachel
+                });
+                
+                // Audio is an HTMLAudioElement with src="blob:..."
+                const blobUrl = audio.src;
+                const blob = await fetch(blobUrl).then(r => r.blob());
+                const reader = new FileReader();
+                reader.readAsDataURL(blob);
+                reader.onloadend = async () => {
+                    const base64data = reader.result as string;
+                    // Upload to save
+                    const saveRes = await fetch('/api/save-audio', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                             audioData: base64data,
+                             prompt: audioText,
+                             provider: 'elevenlabs-puter',
+                             mimeType: blob.type
+                        })
+                    });
+                    const saveData = await saveRes.json();
+                    if(saveData.success) {
+                        setAudioResult({ view_url: saveData.view_url });
+                    }
+                };
+            }
+        } else {
+            // S2S (Voice Cloning/Conversion)
+            if (!audioFile) throw new Error("Select an audio file");
+            
+            // We need a URL for Puter. 
+            // Workaround: We upload to a temp endpoint or just use URL.createObjectURL?
+            // Puter.js runs in browser, so URL.createObjectURL(file) MIGHT work if Puter library handles blob URLs?
+            // If Puter sends URL to server, it fails. If Puter fetches natively, it works.
+            // Documentation says "puter.ai.speech2speech(url)".
+            // Let's try object URL.
+            const objectUrl = URL.createObjectURL(audioFile);
+            
+            // @ts-ignore
+            const audio = await puter.ai.speech2speech(objectUrl, {
+                 provider: 'elevenlabs',
+                 model: 'eleven_multilingual_sts_v2',
+                 voice: '21m00Tcm4TlvDq8ikWAM' 
+            });
+            
+             const blobUrl = audio.src;
+             const blob = await fetch(blobUrl).then(r => r.blob());
+             const reader = new FileReader();
+             reader.readAsDataURL(blob);
+             reader.onloadend = async () => {
+                 const base64data = reader.result as string;
+                 const saveRes = await fetch('/api/save-audio', {
+                     method: 'POST',
+                     headers: {'Content-Type': 'application/json'},
+                     body: JSON.stringify({
+                          audioData: base64data,
+                          prompt: "Voice Conversion",
+                          provider: 'elevenlabs-puter-s2s',
+                          mimeType: blob.type
+                     })
+                 });
+                 const saveData = await saveRes.json();
+                 if(saveData.success) {
+                     setAudioResult({ view_url: saveData.view_url });
+                 }
+             };
+        }
+    } catch (e: any) {
+        console.error(e);
+        setError(e.message || "Error generating audio");
+    } finally {
+        setAudioLoading(false);
+    }
+  };
+
   const handleSaveImage = async () => {
       if (selectedCandidate === null || !result?.candidates) return;
       setSaving(true);
@@ -256,7 +395,7 @@ export default function Home() {
             <div style={{ fontSize: '14px', fontWeight: 'normal' }}>
                 👤 {user.username} 
                 <button onClick={toggleGallery} style={{ marginLeft: '10px', padding: '4px 8px', border: '1px solid #0070f3', borderRadius: '4px', background: showGallery ? '#0070f3' : 'transparent', color: showGallery ? 'white' : '#0070f3', cursor: 'pointer' }}>
-                  🖼️ Mis Imágenes
+                  {activeTab === 'image' ? '🖼️ Mis Imágenes' : '🎧 Mis Audios'}
                 </button>
                 <button onClick={handleLogout} style={{ marginLeft: '10px', padding: '4px 8px', border: '1px solid #ccc', borderRadius: '4px', background: 'transparent', cursor: 'pointer' }}>Salir</button>
             </div>
@@ -267,17 +406,17 @@ export default function Home() {
       {showGallery && user && (
         <div style={{ marginBottom: '30px', padding: '20px', background: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce5ff' }}>
           <h3 style={{ marginTop: 0, display: 'flex', justifyContent: 'space-between' }}>
-            🖼️ Mi Galería
-            <button onClick={fetchMyImages} style={{ fontSize: '12px', padding: '2px 8px', cursor: 'pointer' }}>🔄 Actualizar</button>
+            {activeTab === 'image' ? '🖼️ Mi Galería de Imágenes' : '🎧 Mi Biblioteca de Audio'}
+            <button onClick={activeTab === 'image' ? fetchMyImages : fetchMyAudios} style={{ fontSize: '12px', padding: '2px 8px', cursor: 'pointer' }}>🔄 Actualizar</button>
           </h3>
           
           {galleryLoading ? (
-            <p>Cargando imágenes...</p>
-          ) : myImages.length === 0 ? (
-            <p style={{ color: '#666', fontStyle: 'italic' }}>No tienes imágenes guardadas aún.</p>
+            <p>Cargando...</p>
+          ) : (activeTab === 'image' ? myImages.length === 0 : myAudios.length === 0) ? (
+            <p style={{ color: '#666', fontStyle: 'italic' }}>No tienes {activeTab === 'image' ? 'imágenes' : 'audios'} guardadas aún.</p>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '15px' }}>
-              {myImages.map((img) => (
+              {activeTab === 'image' ? myImages.map((img) => (
                 <div key={img.id} style={{ background: 'white', padding: '10px', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
                   <a href={img.view_url} target="_blank" rel="noopener noreferrer">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -288,6 +427,20 @@ export default function Home() {
                   </p>
                   <p style={{ fontSize: '10px', color: '#888', margin: '2px 0 0' }}>
                     {new Date(img.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              )) : myAudios.map((audio) => (
+                <div key={audio.id} style={{ background: 'white', padding: '10px', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                   <div style={{ width: '100%', aspectRatio: '1/1', background: '#eee', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', marginBottom: '5px' }}>
+                       <span style={{ fontSize: '40px' }}>🎵</span>
+                   </div>
+                   {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                   <audio controls src={audio.view_url} style={{ width: '100%', height: '30px' }} />
+                   <p style={{ fontSize: '11px', margin: '5px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 'bold' }} title={audio.prompt}>
+                    {audio.prompt}
+                  </p>
+                  <p style={{ fontSize: '10px', color: '#888', margin: '2px 0 0' }}>
+                     {audio.provider} • {new Date(audio.created_at).toLocaleDateString()}
                   </p>
                 </div>
               ))}
@@ -376,7 +529,28 @@ export default function Home() {
               </form>
           </div>
       )}
+      
+      <Script src="https://js.puter.com/v2/" />
 
+      {/* Mode Switcher */}
+      {user && (
+          <div style={{ display: 'flex', marginBottom: '20px', borderBottom: '1px solid #ddd' }}>
+              <button 
+                onClick={() => setActiveTab('image')}
+                style={{ padding: '10px 20px', background: 'transparent', border: 'none', borderBottom: activeTab === 'image' ? '2px solid #0070f3' : 'none', fontWeight: activeTab === 'image' ? 'bold' : 'normal', cursor: 'pointer' }}
+              >
+                  🖼️ Imágenes
+              </button>
+              <button 
+                onClick={() => setActiveTab('audio')}
+                style={{ padding: '10px 20px', background: 'transparent', border: 'none', borderBottom: activeTab === 'audio' ? '2px solid #0070f3' : 'none', fontWeight: activeTab === 'audio' ? 'bold' : 'normal', cursor: 'pointer' }}
+              >
+                  🔊 Audio / Voz
+              </button>
+          </div>
+      )}
+
+      {activeTab === 'image' && (
       <div style={{ border: '1px solid #ddd', borderRadius: '6px', padding: '20px', marginBottom: '20px', opacity: !user ? 0.5 : 1, pointerEvents: !user ? 'none' : 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
           <span style={{ background: '#0070f3', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold', marginRight: '10px' }}>POST</span>
@@ -508,14 +682,15 @@ export default function Home() {
           </button>
         </form>
       </div>
+      )}
 
-      {error && (
+      {error && activeTab === 'image' && (
         <div style={{ background: '#fff2f2', border: '1px solid #ffcccc', color: '#cc0000', padding: '15px', borderRadius: '6px', marginBottom: '20px' }}>
           <strong>Error:</strong> {error}
         </div>
       )}
 
-      {result && (
+      {result && activeTab === 'image' && (
         <div style={{ background: '#f9fff9', border: '1px solid #ccffcc', padding: '20px', borderRadius: '6px' }}>
           <h3 style={{ marginTop: 0, color: '#006600' }}>✅ Resultados ({result.candidates?.length} generadas):</h3>          
           
@@ -588,5 +763,93 @@ export default function Home() {
           )}
         </div>
       )}
+
+      {/* Audio Tab */}
+      {activeTab === 'audio' && (
+      <div style={{ border: '1px solid #ddd', borderRadius: '6px', padding: '20px', marginBottom: '20px', opacity: !user ? 0.5 : 1, pointerEvents: !user ? 'none' : 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
+            <span style={{ background: '#0070f3', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold', marginRight: '10px' }}>POST</span>
+            <code style={{ background: '#f5f5f5', padding: '2px 6px', borderRadius: '4px' }}>/api/tts/generate</code>
+          </div>
+          
+          <div style={{ marginBottom: '20px', display: 'flex', gap: '10px' }}>
+               <button type="button" onClick={()=>setAudioMode('tts')} style={{ padding:'5px 10px', background: audioMode==='tts'?'#333':'#eee', color: audioMode==='tts'?'white':'black', border:'none', borderRadius:'4px', cursor: 'pointer' }}>Text to Speech</button>
+               <button type="button" onClick={()=>setAudioMode('s2s')} style={{ padding:'5px 10px', background: audioMode==='s2s'?'#333':'#eee', color: audioMode==='s2s'?'white':'black', border:'none', borderRadius:'4px', cursor: 'pointer' }}>Voice Clone (S2S)</button>
+          </div>
+
+          <form onSubmit={handleAudioGenerate}>
+              {audioMode === 'tts' && (
+                  <>
+                    <div style={{ marginBottom: '15px' }}>
+                        <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>Proveedor:</label>
+                        <select value={audioProvider} onChange={(e)=>setAudioProvider(e.target.value as any)} style={{ width: '100%', padding: '10px', borderRadius: '4px', background: 'white', border: '1px solid #ccc' }}>
+                            <option value="elevenlabs">ElevenLabs</option>
+                            <option value="cartesia">Cartesia</option>
+                        </select>
+                    </div>
+                    <div style={{ marginBottom: '15px' }}>
+                        <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>Texto:</label>
+                        <textarea 
+                            value={audioText}
+                            onChange={(e) => setAudioText(e.target.value)}
+                            placeholder="Escribe algo para hablar..."
+                            style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', minHeight: '80px', fontFamily: 'inherit' }}
+                            required={audioMode === 'tts'}
+                        />
+                    </div>
+                  </>
+              )}
+
+              {audioMode === 's2s' && (
+                   <div style={{ marginBottom: '15px' }}>
+                       <p style={{ fontSize: '14px', color: '#666', marginBottom: '10px' }}>
+                           Sube un audio para convertirlo a la voz de &quot;Rachel&quot; usando ElevenLabs (Puter).
+                       </p>
+                       <input 
+                         type="file" 
+                         accept="audio/*"
+                         onChange={(e) => e.target.files && setAudioFile(e.target.files[0])}
+                         required={audioMode === 's2s'}
+                       />
+                   </div>
+              )}
+
+              <button 
+                type="submit" 
+                disabled={audioLoading}
+                style={{ 
+                  background: audioLoading ? '#ccc' : '#0070f3', 
+                  color: 'white', 
+                  border: 'none', 
+                  padding: '10px 20px', 
+                  borderRadius: '5px', 
+                  cursor: audioLoading ? 'not-allowed' : 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '16px',
+                  width: '100%'
+                }}
+              >
+                {audioLoading ? 'Generando...' : '🎧 Generar Audio'}
+              </button>
+          </form>
+          
+          {error && activeTab === 'audio' && (
+            <div style={{ marginTop: '20px', background: '#fff2f2', border: '1px solid #ffcccc', color: '#cc0000', padding: '15px', borderRadius: '6px' }}>
+              <strong>Error:</strong> {error}
+            </div>
+          )}
+
+          {audioResult && (
+             <div style={{ marginTop: '20px', background: '#f9fff9', border: '1px solid #ccffcc', padding: '20px', borderRadius: '6px', textAlign: 'center' }}>
+                 <h3 style={{ marginTop: 0, color: '#006600' }}>✅ Audio Generado</h3>
+                 {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                 <audio controls src={audioResult.view_url} style={{ width: '100%', marginBottom: '10px' }} autoPlay />
+                 <p><a href={audioResult.view_url} target="_blank" style={{ color: '#0070f3' }}>Abrir Enlace Permanente</a></p>
+             </div>
+          )}
+
+      </div>
+      )}
+
   </main>
   )}

@@ -332,6 +332,127 @@ const swaggerSpec = swaggerJsdoc(options);
       },
     },
   },
+  '/api/tts/cartesia': {
+    post: {
+      summary: 'Generate Text-to-Speech (Cartesia)',
+      description: 'Generates speech from text using Cartesia API (Server-side) and saves to DB.',
+      tags: ['Audio'],
+      security: [{ cookieAuth: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['text'],
+              properties: {
+                text: { type: 'string', description: 'Text to synthesize' },
+                voice_id: { type: 'string', description: 'Optional voice ID' }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        200: {
+          description: 'Audio generated and saved',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean' },
+                  audio_id: { type: 'string' },
+                  view_url: { type: 'string' }
+                }
+              }
+            }
+          }
+        },
+        401: { description: 'Unauthorized' }
+      }
+    }
+  },
+  '/api/save-audio': {
+    post: {
+      summary: 'Save User Audio',
+      description: 'Saves audio generated client-side (e.g. ElevenLabs via Puter) or uploaded.',
+      tags: ['Audio'],
+      security: [{ cookieAuth: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['audioData', 'provider'],
+              properties: {
+                audioData: { type: 'string', description: 'Base64 encoded audio or data URI' },
+                prompt: { type: 'string' },
+                provider: { type: 'string' },
+                mimeType: { type: 'string' }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        200: {
+          description: 'Audio saved',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean' },
+                  view_url: { type: 'string' }
+                }
+              }
+            }
+          }
+        },
+        401: { description: 'Unauthorized' }
+      }
+    }
+  },
+  '/api/my-audios': {
+    get: {
+      summary: 'Get User Audios',
+      description: 'Retrieves history of generated audios for the current user.',
+      tags: ['Audio'],
+      security: [{ cookieAuth: [] }],
+      responses: {
+        200: {
+          description: 'List of user audios',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean' },
+                  count: { type: 'integer' },
+                  audios: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'string' },
+                        prompt: { type: 'string' },
+                        provider: { type: 'string' },
+                        created_at: { type: 'string' },
+                        view_url: { type: 'string' }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        401: { description: 'Unauthorized' }
+      }
+    }
+  },
 };
 
 

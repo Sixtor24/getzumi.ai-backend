@@ -470,7 +470,7 @@ const swaggerSpec = swaggerJsdoc(options);
               required: ['prompt'],
               properties: {
                 prompt: { type: 'string', example: 'A cinematic drone shot of a futuristic city at sunset' },
-                model: { type: 'string', enum: ['sora_video2', 'sora_video2-landscape', 'sora_video2-15s', 'sora_video2-landscape-15s'], default: 'sora_video2' },
+                model: { type: 'string', enum: ['sora_video2', 'sora-2-pro', 'sora_video2-landscape', 'sora_video2-15s', 'sora_video2-landscape-15s'], default: 'sora_video2', description: 'Model to use. sora-2-pro uses Async API processing (3-5 mins), others use Sync Streaming.' },
                 input_image: { type: 'string', description: 'Optional base64 or URL of an image to animate' }
               },
             },

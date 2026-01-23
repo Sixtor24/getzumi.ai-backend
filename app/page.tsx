@@ -1056,6 +1056,9 @@ export default function Home() {
               <p style={{ textAlign: 'center', fontSize: '12px', margin: '5px 0 0', color: '#666' }}>
                 Generando (Sora): {videoPercent.toFixed(1)}%
               </p>
+              <p style={{ textAlign: 'center', fontSize: '11px', color: '#999', marginTop: '2px' }}>
+                 Tiempo Estimado: {videoModel === 'sora-2-pro' ? '3 a 5 minutos (Alta Calidad)' : '30 a 60 segundos'}
+              </p>
               {/* Optional: detail logs toggle? For now we hide raw logs as requested */}
             </div>
           )}

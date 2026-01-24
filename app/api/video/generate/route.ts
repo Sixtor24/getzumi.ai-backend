@@ -1,7 +1,64 @@
-
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '../../../../lib/mongodb';
 import jwt from 'jsonwebtoken';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import fs from 'fs';
+import path from 'path';
+import { randomUUID } from 'crypto';
+import { promisify } from 'util';
+import * as stream from 'stream';
+
+// Configure FFMPEG
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+const pipeline = promisify(stream.pipeline);
+
+// Helper: Download file
+async function downloadFile(url: string, outputPath: string) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Failed to download ${url}: ${response.statusText}`);
+    if (!response.body) throw new Error(`No body in response ${url}`);
+    
+    // @ts-ignore
+    await pipeline(response.body, fs.createWriteStream(outputPath));
+}
+
+// Helper: Extract last frame
+async function extractLastFrame(videoPath: string): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+        const tempDir = path.dirname(videoPath);
+        const filename = path.basename(videoPath, path.extname(videoPath)) + '_last.jpg';
+        const outputPath = path.join(tempDir, filename);
+
+        ffmpeg(videoPath)
+            .on('end', () => {
+                const readStream = fs.createReadStream(outputPath);
+                const chunks: any[] = [];
+                readStream.on('data', (chunk) => chunks.push(chunk));
+                readStream.on('end', () => resolve(Buffer.concat(chunks)));
+                readStream.on('error', reject);
+            })
+            .on('error', (err) => reject(err))
+            .screenshots({
+                count: 1,
+                timemarks: ['99%'], // Near end
+                filename: filename,
+                folder: tempDir
+            });
+    });
+}
+
+// Helper: Concatenate videos
+async function concatVideos(videoPaths: string[], outputPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const cmd = ffmpeg();
+        videoPaths.forEach(p => cmd.input(p));
+        
+        cmd.on('end', () => resolve())
+           .on('error', (err) => reject(err))
+           .mergeToFile(outputPath, path.dirname(outputPath)); // tempDir
+    });
+}
 
 export async function POST(req: NextRequest) {
     try {
@@ -16,8 +73,9 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: false, message: "Invalid session" }, { status: 401 });
         }
 
-        const { prompt, model, input_image, input_images, seconds } = await req.json();
-
+        const body = await req.json();
+        const { prompt, model, input_image, input_images, seconds, aspect_ratio } = body;
+        
         if (!prompt) {
             return NextResponse.json({ success: false, message: "Prompt is required" }, { status: 400 });
         }
@@ -29,319 +87,350 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: false, message: "API Configuration Missing" }, { status: 500 });
         }
 
-        // --- ASYNC API HANDLER (Sora 2 Pro, Sora 2 Async, Veo) ---
-        // Docs: https://docs.laozhang.ai/en/api-capabilities/sora2/async-api
-        // Docs: https://docs.laozhang.ai/en/api-capabilities/veo/veo-31-async-api
+        // --- MODEL SELECTION LOGIC ---
+        // Async Models: sora-2, sora-2-pro, veo-*
         if (model === "sora-2-pro" || model === "sora-2" || model.startsWith("veo-")) {
-            try {
-                // 1. Prepare FormData for Async API
-                const formData = new FormData();
-                formData.append("prompt", prompt);
-                formData.append("model", model);
+            
+            const encoder = new TextEncoder();
+            const streamOut = new ReadableStream({
+                async start(controller) {
+                    const sendChunk = (text: string) => {
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                            choices: [{ delta: { content: text } }] 
+                        })}\n\n`));
+                    };
 
-                // --- SORA SPECIFIC ---
-                if (model.startsWith("sora-")) {
-                    // Sora supports 'seconds' and 'size'
-                    // Default to 1080x1920 for Pro if not specified, or just let API default? 
-                    // Docs: size="1280x720", "720x1280".
-                    // We will default to landscape 1280x720 if not provided, or respect user intent if we had a param.
-                    formData.append("size", "1280x720"); 
-                    
-                    // Duration: "10", "15". 
-                    // If user requests more, we pass it, but standard is 10/15.
-                    if (seconds) {
-                        formData.append("seconds", seconds.toString());
-                    } else {
-                        formData.append("seconds", "15");
-                    }
-                }
-
-                // --- VEO SPECIFIC ---
-                if (model.startsWith("veo-")) {
-                    // Veo Docs DO NOT list 'seconds' or 'size' as params in the standard Async API table.
-                    // We DO NOT append 'seconds' here to avoid 400 Bad Request.
-                    // Veo models handle resolution via model name suffixes (e.g. -landscape).
-                    
-                    // Handle Image-to-Video Model Switching for Veo
-                    const hasImages = (input_images && input_images.length > 0) || !!input_image;
-                    if (hasImages && !model.includes("-fl")) {
-                        // Switch to frame-loop (-fl) model if images provided but base model selected
-                        // Example: veo-3.1-landscape -> veo-3.1-landscape-fl
-                        // Example: veo-3.1 -> veo-3.1-fl
-                        let newModel = model;
-                         if (model.includes("-fast")) {
-                            newModel = model.replace("-fast", "-fast-fl");
-                        } else {
-                            newModel = model + "-fl";
-                        }
-                        // Fix double suffix or invalid combos if needed (simple append works for standard names)
-                        formData.set("model", newModel);
-                    }
-                }
-
-                // --- IMAGE HANDLING (Common for Async) ---
-                const imagesToProcess = input_images && input_images.length > 0 ? input_images : (input_image ? [input_image] : []);
-                
-                if (imagesToProcess.length > 0) {
-                    for (let i = 0; i < imagesToProcess.length; i++) {
-                        const b64 = imagesToProcess[i];
-                        // Remove header if present (data:image/jpeg;base64,...)
-                        const base64Data = b64.replace(/^data:image\/\w+;base64,/, "");
-                        const buffer = Buffer.from(base64Data, 'base64');
-                        const blob = new Blob([buffer], { type: 'image/jpeg' }); 
+                    try {
+                        let finalVideoUrl = "";
                         
-                        // Parameter name is 'input_reference' for both Sora and Veo
-                        formData.append("input_reference", blob, `ref_image_${i}.jpg`);
-                    }
-                }
+                        // Map Aspect Ratio
+                        let videoSize = "1280x720"; // default 16:9
+                        if (aspect_ratio === "9:16") videoSize = "720x1280";
+                        else if (aspect_ratio === "1:1") videoSize = "1024x1024";
 
-                // 2. Submit Task
-                console.log(`[Async] Submitting task for ${model}...`);
-                const submitRes = await fetch(`${baseUrl}/v1/videos`, {
-                    method: 'POST',
-                    headers: { 
-                        'Authorization': `Bearer ${apiKey}`
-                        // Content-Type header is set automatically with boundary by FormData
-                    },
-                    body: formData
-                });
+                        // Helper to adjust Veo Model Name based on aspect ratio AND input images
+                        const getVeoModelName = (baseModel: string, ratio: string, hasInputImages: boolean) => {
+                             if (!baseModel.startsWith('veo')) return baseModel;
+                             
+                             // 1. Clean base string to root "veo-3.1"
+                             // Remove existing suffixes to rebuild from scratch
+                             let clean = baseModel
+                                .replace('-landscape', '')
+                                .replace('-portrait', '')
+                                .replace('-fl', '')
+                                .replace('-fast', '');
+                             
+                             // 2. Add aspect ratio suffix
+                             // Docs: veo-3.1 = Portrait (9:16), veo-3.1-landscape = Landscape (16:9)
+                             if (ratio === '16:9') {
+                                 clean += '-landscape';
+                             } else {
+                                 // Default is Portrait (9:16) for veo-3.1 base
+                                 // If ratio is 1:1, we still settle for Portrait as closest supported
+                             }
 
-                if (!submitRes.ok) {
-                    const errText = await submitRes.text();
-                    console.error("Async Submit Error:", errText);
-                    return NextResponse.json({ success: false, message: "Provider Error: " + errText }, { status: 502 });
-                }
+                             // 3. Add Fast suffix if requested (checked from original input)
+                             if (baseModel.includes('fast')) {
+                                 clean += '-fast';
+                             }
 
-                const submitData = await submitRes.json();
-                const taskId = submitData.id;
-                console.log(`[Async] Task created: ${taskId}`);
+                             // 4. Add FL suffix if images are present (CRITICAL for Img2Vid)
+                             if (hasInputImages) {
+                                 clean += '-fl';
+                             }
+                             
+                             return clean;
+                        };
 
-                // 3. Polling Logic (Stream)
-                const encoder = new TextEncoder();
-                const stream = new ReadableStream({
-                    async start(controller) {
-                        let isComplete = false;
-                        let attempts = 0;
-                        const maxAttempts = 300; // ~25 mins (5s interval) - Sora Pro can take 10+ mins
-                        
-                        while (!isComplete && attempts < maxAttempts) {
-                            attempts++;
-                            try {
+                        // --- VEO LOOP LOGIC (> 15s) ---
+                        // Only trigger if model is Veo AND seconds requested > 15
+                        if (model.startsWith("veo-") && seconds && parseInt(seconds) > 15) {
+                            sendChunk(`Initialing Veo Chain Loop for ${seconds}s (Aspect: ${aspect_ratio || '16:9'})...\n`);
+                            
+                            const tempDir = path.join(process.cwd(), 'public', 'generated', 'temp_' + randomUUID());
+                            if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+
+                            const videoSegments: string[] = [];
+                            let currentImages = input_images && input_images.length > 0 ? [...input_images] : (input_image ? [input_image] : []);
+                            
+                            // Estimate iterations. Veo is usually ~5s.
+                            const targetDuration = parseInt(seconds);
+                            const segmentDuration = 5; 
+                            const iterations = Math.ceil(targetDuration / segmentDuration);
+
+                            for (let i = 0; i < iterations; i++) {
+                                sendChunk(`\nGenerando segmento ${i + 1}/${iterations}...\n`);
+                                
+                                const hasImages = currentImages.length > 0;
+                                
+                                // Construct Correct Model Name (Auto-add -fl if images exist)
+                                let currentModel = getVeoModelName(model, aspect_ratio || '16:9', hasImages);
+
+                                // 1. Submit Request
+                                const formData = new FormData();
+                                formData.append("prompt", prompt);
+                                formData.append("model", currentModel);
+                                
+                                // CRITICAL: Do NOT send 'size' or 'aspect_ratio' to Veo. 
+                                // It is controlled solely by 'currentModel' suffix (e.g. -landscape).
+                                if (!model.startsWith('veo')) {
+                                     formData.append("size", videoSize);
+                                }
+
+                                
+                                // Attach images
+                                for (let j = 0; j < currentImages.length; j++) {
+                                    const b64 = currentImages[j];
+                                    if (!b64 || typeof b64 !== 'string') continue;
+                                    const base64Data = b64.replace(/^data:image\/\w+;base64,/, "");
+                                    const buffer = Buffer.from(base64Data, 'base64');
+                                    const blob = new Blob([buffer], { type: 'image/jpeg' });
+                                    formData.append("input_reference", blob, `ref_${i}_${j}.jpg`);
+                                }
+
+                                const submitRes = await fetch(`${baseUrl}/v1/videos`, {
+                                    method: 'POST',
+                                    headers: { 'Authorization': `Bearer ${apiKey}` },
+                                    body: formData
+                                });
+
+                                if (!submitRes.ok) throw new Error("API Error: " + await submitRes.text());
+                                const submitData = await submitRes.json();
+                                const taskId = submitData.id;
+
+                                // 2. Poll
+                                let segmentUrl = null;
+                                let polls = 0;
+                                while (!segmentUrl && polls < 120) { // 10 mins max per segment
+                                    polls++;
+                                    await new Promise(r => setTimeout(r, 5000));
+                                    const statusRes = await fetch(`${baseUrl}/v1/videos/${taskId}`, {
+                                        headers: { 'Authorization': `Bearer ${apiKey}` }
+                                    });
+                                    if (statusRes.ok) {
+                                        const statusData = await statusRes.json();
+                                        if (statusData.status === 'completed') {
+                                            segmentUrl = statusData.url;
+                                            if (!segmentUrl) {
+                                                const contentRes = await fetch(`${baseUrl}/v1/videos/${taskId}/content`, {
+                                                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                                                });
+                                                if(contentRes.ok) segmentUrl = (await contentRes.json()).url;
+                                            }
+                                        } else if (statusData.status === 'failed') {
+                                            throw new Error("Segment generation failed");
+                                        }
+                                        sendChunk(`Status: ${statusData.status} (${statusData.progress || 0}%)\n`);
+                                    }
+                                }
+
+                                if (!segmentUrl) throw new Error("Timeout generating segment");
+
+                                // 3. Download
+                                sendChunk(`Descargando segmento ${i+1}...\n`);
+                                const segPath = path.join(tempDir, `seg_${i}.mp4`);
+                                await downloadFile(segmentUrl, segPath);
+                                videoSegments.push(segPath);
+                                sendChunk(`Segmento guardado.\n`);
+
+                                // 4. Prepare next iteration (Extract Frame)
+                                if (i < iterations - 1) {
+                                    sendChunk(`Extrayendo frame de referencia para el siguiente tramo...\n`);
+                                    try { 
+                                        const lastFrameBuffer = await extractLastFrame(segPath);
+                                        const b64Frame = "data:image/jpeg;base64," + lastFrameBuffer.toString('base64');
+                                        currentImages = [b64Frame]; // Next segment uses ONLY the last frame of previous
+                                    } catch (err: any) {
+                                        sendChunk(`Warn: Error extrayendo frame: ${err.message}. Usando configuración previa.\n`);
+                                    }
+                                }
+                            }
+
+                            // 5. Stitch
+                            if (videoSegments.length > 0) {
+                                sendChunk(`\nUniendo ${videoSegments.length} videos...\n`);
+                                const finalFileName = `veo_long_${randomUUID()}.mp4`;
+                                const publicGenDir = path.join(process.cwd(), 'public', 'generated');
+                                if (!fs.existsSync(publicGenDir)) fs.mkdirSync(publicGenDir, { recursive: true });
+                                
+                                const finalPath = path.join(publicGenDir, finalFileName);
+                                
+                                try {
+                                    await concatVideos(videoSegments, finalPath);
+                                    
+                                    // 6. Set Final URL
+                                    const protocol = req.headers.get('x-forwarded-proto') || 'http';
+                                    const host = req.headers.get('host');
+                                    finalVideoUrl = `${protocol}://${host}/generated/${finalFileName}`;
+                                } catch (e: any) {
+                                    throw new Error("Error uniendo videos: " + e.message);
+                                }
+
+                                // Clean Temp
+                                try {
+                                    fs.rmSync(tempDir, { recursive: true, force: true });
+                                } catch (e) { console.error("Temp cleanup failed", e); }
+                            } else {
+                                throw new Error("No video segments generated.");
+                            }
+                            
+                        } 
+                        // --- STANDARD ASYNC LOGIC (Sora or Veo <= 15) ---
+                        else {
+                            const formData = new FormData();
+                            formData.append("prompt", prompt);
+                            
+                            // Images Check
+                            const imagesToProcess = input_images && input_images.length > 0 ? input_images : (input_image ? [input_image] : []);
+                            const hasImages = imagesToProcess.length > 0;
+
+                            let finalModel = model;
+                            if (model.startsWith('veo')) {
+                                finalModel = getVeoModelName(model, aspect_ratio || '16:9', hasImages);
+                            }
+                            formData.append("model", finalModel);
+
+                            // Sora Specific
+                            if (model.startsWith("sora-")) {
+                                formData.append("size", videoSize); // Use mapped size
+                                if (seconds) formData.append("seconds", seconds.toString());
+                                else formData.append("seconds", "15");
+                            }
+
+                            // Veo Specific: No valid params besides model/prompt/input_reference
+                            
+                            // Attach Images
+                            for (let i = 0; i < imagesToProcess.length; i++) {
+                                const b64 = imagesToProcess[i];
+                                const base64Data = b64.replace(/^data:image\/\w+;base64,/, "");
+                                const buffer = Buffer.from(base64Data, 'base64');
+                                const blob = new Blob([buffer], { type: 'image/jpeg' });
+                                formData.append("input_reference", blob, `ref_img_${i}.jpg`);
+                            }
+
+                            console.log(`[Async] Submitting single task for ${finalModel} (Input: ${model}, Aspect: ${aspect_ratio || '16:9'})...`);
+                            const submitRes = await fetch(`${baseUrl}/v1/videos`, {
+                                method: 'POST',
+                                headers: { 'Authorization': `Bearer ${apiKey}` },
+                                body: formData
+                            });
+
+                            if (!submitRes.ok) {
+                                const errText = await submitRes.text();
+                                console.error(`Provider Error for ${finalModel}:`, errText);
+                                throw new Error("Provider Error: " + errText);
+                            }
+                            const submitData = await submitRes.json();
+                            const taskId = submitData.id;
+
+                            // Standard Loop
+                            let polls = 0;
+                            while (!finalVideoUrl && polls < 300) {
+                                polls++;
+                                await new Promise(r => setTimeout(r, 5000));
                                 const statusRes = await fetch(`${baseUrl}/v1/videos/${taskId}`, {
                                     headers: { 'Authorization': `Bearer ${apiKey}` }
                                 });
-                                
                                 if (statusRes.ok) {
                                     const statusData = await statusRes.json();
-                                    const state = statusData.status; 
-                                    const progress = statusData.progress || (state === 'completed' ? 100 : 0);
-                                    
-                                    // Helper to send SSE
-                                    const sendChunk = (text: string) => {
-                                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
-                                            choices: [{ delta: { content: text } }] 
-                                        })}\n\n`));
-                                    };
-
-                                    if (state !== 'completed' && state !== 'failed') {
-                                        sendChunk(`Status: ${state} (Progress: ${progress}%)\n`);
-                                    }
+                                    const state = statusData.status;
+                                    sendChunk(`Status: ${state} (${statusData.progress || 0}%)\n`);
 
                                     if (state === 'completed') {
-                                        isComplete = true;
-                                        let videoUrl = statusData.url; 
-                                        
-                                        // If url missing in status, fetch /content
-                                        if (!videoUrl) {
-                                             const contentRes = await fetch(`${baseUrl}/v1/videos/${taskId}/content`, {
+                                        finalVideoUrl = statusData.url;
+                                        if (!finalVideoUrl) {
+                                             const cRes = await fetch(`${baseUrl}/v1/videos/${taskId}/content`, {
                                                  headers: { 'Authorization': `Bearer ${apiKey}` }
                                              });
-                                             if (contentRes.ok) {
-                                                 const contentData = await contentRes.json();
-                                                 videoUrl = contentData.url;
-                                             }
+                                             if(cRes.ok) finalVideoUrl = (await cRes.json()).url;
                                         }
-
-                                        if (videoUrl) {
-                                            sendChunk(`\n\nDONE: [Download Video](${videoUrl})`);
-                                            
-                                            // Save to MongoDB
-                                            const client = await clientPromise;
-                                            const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
-                                            await db.collection("generated_videos").insertOne({
-                                                user_id: userId,
-                                                prompt,
-                                                model,
-                                                video_url: videoUrl,
-                                                created_at: new Date()
-                                            });
-                                        }
-                                        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
                                     } else if (state === 'failed') {
-                                        isComplete = true;
-                                        const errorMsg = statusData.error?.message || "Unknown error";
-                                        sendChunk(`\n\nError: Generation failed - ${errorMsg}`);
-                                        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                                        throw new Error(statusData.error?.message || "Generation Failed");
                                     }
                                 }
-                            } catch (e) {
-                                console.error("Polling Error:", e);
+                            }
+                        }
+
+                        if (finalVideoUrl) {
+                            sendChunk(`\n\nDONE: [Download Video](${finalVideoUrl})`);
+                            
+                            try {
+                                const client = await clientPromise;
+                                const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
+                                await db.collection("generated_videos").insertOne({
+                                    user_id: userId,
+                                    prompt,
+                                    model,
+                                    video_url: finalVideoUrl,
+                                    created_at: new Date()
+                                });
+                                console.log(`Saved video to DB: ${finalVideoUrl}`);
+                            } catch (dbErr) {
+                                console.error("DB Save Error:", dbErr);
                             }
 
-                            if (!isComplete) {
-                                await new Promise(r => setTimeout(r, 5000));
-                            }
-                        }
-                        
-                        if (!isComplete) {
-                             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
-                                choices: [{ delta: { content: "\n\nTimeout: Generation took too long." } }] 
-                            })}\n\n`));
                             controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                        } else {
+                            throw new Error("Timeout or No URL returned");
                         }
+
+                    } catch (error: any) {
+                        console.error("Async Loop Error:", error);
+                        sendChunk(`\n\nError: ${error.message}`);
+                        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                    } finally {
                         controller.close();
                     }
-                });
+                }
+            });
 
-                return new NextResponse(stream, {
-                    headers: {
-                        'Content-Type': 'text/event-stream',
-                        'Cache-Control': 'no-cache',
-                        'Connection': 'keep-alive',
-                    },
-                });
-
-            } catch (error) {
-                console.error("Async Process Error:", error);
-                return NextResponse.json({ success: false, message: "Internal Server Error" }, { status: 500 });
-            }
-        }
+            return new NextResponse(streamOut, {
+                headers: {
+                    'Content-Type': 'text/event-stream',
+                    'Cache-Control': 'no-cache',
+                    'Connection': 'keep-alive',
+                },
+            });
+        } 
         
-        // --- EXISTING SYNC HANDLER ---
-        const messages: any[] = [
-            {
-                role: "user",
-                content: [
-                    { type: "text", text: prompt }
-                ]
-            }
-        ];
+        // --- SYNC API HANDLER (Fallback / Legacy) ---
+        else {
+             const messages: any[] = [{ role: "user", content: [{ type: "text", text: prompt }] }];
+             if (input_image) messages[0].content.push({ type: "image_url", image_url: { url: input_image } });
 
-        if (input_image) {
-            messages[0].content.push({
-                type: "image_url",
-                image_url: { url: input_image } // Expecting base64 data url or public url
+             const apiRes = await fetch(`${baseUrl}/v1/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: model || "sora_video2",
+                    stream: true,
+                    messages: messages
+                })
+            });
+
+            if (!apiRes.ok) throw new Error(await apiRes.text());
+
+            // Simple pass-through stream
+            const simpleStream = new ReadableStream({
+                 async start(controller) {
+                     // @ts-ignore
+                     for await (const chunk of apiRes.body) {
+                         controller.enqueue(chunk);
+                     }
+                     controller.close();
+                 }
+            });
+
+            return new NextResponse(simpleStream, {
+                headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' }
             });
         }
 
-        const apiRes = await fetch(`${baseUrl}/v1/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-                model: model || "sora_video2",
-                stream: true,
-                messages: messages
-            })
-        });
-
-        if (!apiRes.ok) {
-            const err = await apiRes.text();
-            console.error("APIYI Error:", err);
-            try {
-                const jsonErr = JSON.parse(err);
-                return NextResponse.json({ success: false, message: jsonErr.error?.message || "Provider Error" }, { status: 502 });
-            } catch (e) {
-                return NextResponse.json({ success: false, message: "Provider Error" }, { status: 502 });
-            }
-        }
-
-        const encoder = new TextEncoder();
-        const decoder = new TextDecoder();
-        
-        let accumulatedText = "";
-
-        const stream = new ReadableStream({
-            async start(controller) {
-                // @ts-ignore
-                for await (const chunk of apiRes.body) {
-                    const chunkText = decoder.decode(chunk);
-                    accumulatedText += chunkText;
-                    controller.enqueue(chunk);
-                }
-                controller.close();
-
-                // Process final text to find URL and save to DB
-                // The stream contains multiple "data: JSON" lines. We need to extract the "content" from them.
-                try {
-                    // Extract all "content" parts
-                    const lines = accumulatedText.split('\n');
-                    let fullContent = "";
-                    for (const line of lines) {
-                        if (line.trim().startsWith('data: ') && !line.includes('[DONE]')) {
-                            try {
-                                const jsonStr = line.replace('data: ', '').trim();
-                                const json = JSON.parse(jsonStr);
-                                if (json.choices && json.choices[0].delta && json.choices[0].delta.content) {
-                                    fullContent += json.choices[0].delta.content;
-                                }
-                            } catch (e) {
-                                // Ignore parse errors for partial lines
-                            }
-                        }
-                    }
-
-                    console.log("Full Stream Content for Video:", fullContent);
-
-                    // Regex to find URL in markdown: [click here](https://...) OR just a raw URL
-                    // Pattern in docs: [click here](https://example.com/video.mp4)
-                    let videoUrl = null;
-                    const mdMatch = fullContent.match(/\[.*?\]\((https?:\/\/[^\s)]+)\)/);
-                    if (mdMatch && mdMatch[1]) {
-                        videoUrl = mdMatch[1];
-                    } else {
-                        // Fallback: Search for https URL
-                        const rawMatch = fullContent.match(/(https?:\/\/[^\s]+)/);
-                        if (rawMatch && rawMatch[1]) {
-                             // Cleanup potential trailing chars like ) or ] or .
-                             videoUrl = rawMatch[1].replace(/[)\]\.]+$/, "");
-                        }
-                    }
-
-                    if (videoUrl) {
-                        // Save to MongoDB
-                        const client = await clientPromise;
-                        const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
-                        await db.collection("generated_videos").insertOne({
-                            user_id: userId,
-                            prompt,
-                            model: model || "sora_video2",
-                            video_url: videoUrl,
-                            created_at: new Date()
-                        });
-                        console.log("Video saved to DB:", videoUrl);
-                    } else {
-                        console.warn("No video URL found in stream content");
-                    }
-
-                } catch (err) {
-                    console.error("Error processing video stream completion:", err);
-                }
-            }
-        });
-
-        return new NextResponse(stream, {
-            headers: {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-            },
-        });
-
-    } catch (error) {
-        console.error("Video Generation Error:", error);
-        return NextResponse.json({ success: false, message: "Server Error" }, { status: 500 });
+    } catch (error: any) {
+        console.error("General API Error:", error);
+        return NextResponse.json({ success: false, message: error.message || "Server Error" }, { status: 500 });
     }
 }

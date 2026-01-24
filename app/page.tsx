@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useVideoGenerator } from '../hooks/useVideoGenerator';
 
 import Script from 'next/script';
 
@@ -30,13 +31,13 @@ export default function Home() {
   // Video State
   const [videoPrompt, setVideoPrompt] = useState<string>('');
   const [videoModel, setVideoModel] = useState<string>('sora_video2');
-  const [videoLoading, setVideoLoading] = useState<boolean>(false);
-  const [videoProgress, setVideoProgress] = useState<string>(''); // For text updates like "> Progress: 36%"
-  const [videoPercent, setVideoPercent] = useState<number>(0); // Numeric progress
-  const [videoResult, setVideoResult] = useState<{ video_url: string } | null>(null);
   const [videoDuration, setVideoDuration] = useState<number>(10);
+  const [aspectRatio, setAspectRatio] = useState<string>('16:9');
   const [videoImages, setVideoImages] = useState<File[]>([]);
   const [videoDragActive, setVideoDragActive] = useState<boolean>(false);
+
+  const { generate: generateVideo, loading: hookVideoLoading, progress: hookVideoPercent, result: hookVideoResult, error: hookVideoError, status: videoStatus } = useVideoGenerator();
+
 
   // Image State
   const [prompt, setPrompt] = useState<string>('');
@@ -461,10 +462,6 @@ export default function Home() {
         setError("Debes iniciar sesión");
         return;
     }
-    setVideoLoading(true);
-    setVideoResult(null);
-    setVideoProgress('');
-    setVideoPercent(0);
     setError(null);
 
     try {
@@ -472,85 +469,24 @@ export default function Home() {
         let input_images: string[] = [];
         if (videoImages.length > 0) {
             const filesBase64 = await Promise.all(videoImages.map(img => toBase64(img)));
-            input_images = filesBase64.map(s => {
-                const parts = s.split(',');
-                return parts.length > 1 ? parts[1] : s;
-            });
+            // Hook expects full Data URI usually, but passing what we have is fine as long as server handles it.
+            // Server expects pure base64 in my implementation logic: `b64.replace(/^data:image\/\w+;base64,/, "")`
+            // So passing full Data URI is correct.
+            input_images = filesBase64; 
         }
 
-        const res = await fetch('/api/video/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                prompt: videoPrompt,
-                model: videoModel,
-                input_images,
-                seconds: videoDuration
-            })
+        generateVideo({
+            prompt: videoPrompt,
+            model: videoModel,
+            seconds: videoDuration,
+            aspect_ratio: aspectRatio,
+            input_images
         });
 
-        if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            throw new Error(errData.message || "Error starting video generation");
-        }
-        if (!res.body) throw new Error("No response body");
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let loop = true;
-        let accumulated = "";
-
-        while (loop) {
-            const { done, value } = await reader.read();
-            if (done) {
-                loop = false;
-                break;
-            }
-            const chunk = decoder.decode(value, { stream: true });
-            accumulated += chunk;
-            
-            // Parse progress updates from stream
-            const lines = accumulated.split('\n');
-            // Keep the last partial line in accumulated
-            accumulated = lines.pop() || "";
-
-            for (const line of lines) {
-                if (line.trim().startsWith('data: ') && !line.includes('[DONE]')) {
-                    try {
-                        const jsonStr = line.replace('data: ', '').trim();
-                        const json = JSON.parse(jsonStr);
-                        if (json.choices && json.choices[0].delta && json.choices[0].delta.content) {
-                            const content = json.choices[0].delta.content;
-                            
-                            // Parse progress percentage
-                            // Look for "Progress: 36.0%"
-                            const pctMatch = content.match(/Progress:\s+(\d+(?:\.\d+)?)/);
-                            if (pctMatch) {
-                                setVideoPercent(parseFloat(pctMatch[1]));
-                            }
-
-                            setVideoProgress(prev => {
-                                const newText = prev + content;
-                                // Try to extract URL from the accumulating text
-                                const urlMatch = newText.match(/\[.*?\]\((https?:\/\/[^\s)]+)\)/);
-                                if (urlMatch && urlMatch[1]) {
-                                    setVideoResult({ video_url: urlMatch[1] });
-                                }
-                                return newText;
-                            });
-                        }
-                    } catch (e) { }
-                }
-            }
-        }
-        setVideoPercent(100);
-
     } catch (err: unknown) {
-        let msg = "Unknown error";
-        if (err instanceof Error) msg = err.message;
-        setError(msg);
-    } finally {
-        setVideoLoading(false);
+        console.error(err);
+        // Hook handles its own error state, but we can set global error too if we want
+        // But better to use hook's error in the UI
     }
   };
 
@@ -1064,20 +1000,36 @@ export default function Home() {
                         <option value="sora-2">Sora 2 (Estándar - Async)</option>
                         <option value="sora-2-pro">Sora 2 Pro (HD 1080p - Lento)</option>
                     </optgroup>
-                    <optgroup label="Sora (Sync - Rápido/Legacy)">
-                        <option value="sora_video2">Sora Video 2 (Vertical Sync)</option>
-                        <option value="sora_video2-landscape">Sora Video 2 (Landscape Sync)</option>
-                    </optgroup>
                     <optgroup label="Veo (Google - Async)">
-                        <option value="veo-3.1">Veo 3.1 (Retrato)</option>
-                        <option value="veo-3.1-landscape">Veo 3.1 (Landscape)</option>
-                        <option value="veo-3.1-fast">Veo 3.1 Fast (Rápido)</option>
-                        <option value="veo-3.1-landscape-fast">Veo 3.1 Landscape Fast</option>
+                        <option value="veo-3.1-fl">Veo 3.1</option>
+                        <option value="veo-3.1-fast-fl">Veo 3.1 Fast (Rápido)</option>
                     </optgroup>
                 </select>
-                <p style={{ fontSize: '11px', color: '#666', marginTop: '5px' }}>
-                  {videoModel.includes('sora-2-pro') ? '⚠️ Sora 2 Pro puede tardar hasta 10 min.' : videoModel.startsWith('veo') ? 'ℹ️ Veo soporta Start/End Frames (2 imágenes).' : 'ℹ️ Modelos Sync son rápidos pero menos estables.'}
-                </p>
+            </div>
+
+            <div style={{ marginBottom: '15px' }}>
+                 <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>Aspect Ratio:</label>
+                 <div style={{ display: 'flex', gap: '10px' }}>
+                     {['16:9', '9:16', '1:1'].map(ratio => (
+                         <button
+                            key={ratio}
+                            type="button"
+                            onClick={() => setAspectRatio(ratio)}
+                            style={{
+                                flex: 1,
+                                padding: '10px',
+                                background: aspectRatio === ratio ? '#0070f3' : '#f5f5f5',
+                                color: aspectRatio === ratio ? 'white' : '#333',
+                                border: '1px solid #ddd',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontWeight: aspectRatio === ratio ? 'bold' : 'normal'
+                            }}
+                         >
+                             {ratio}
+                         </button>
+                     ))}
+                 </div>
             </div>
             
             <div style={{ marginBottom: '15px' }}>
@@ -1193,35 +1145,35 @@ export default function Home() {
 
             <button 
                 type="submit" 
-                disabled={videoLoading}
+                disabled={hookVideoLoading}
                 style={{ 
-                  background: videoLoading ? '#ccc' : '#0070f3', 
+                  background: hookVideoLoading ? '#ccc' : '#0070f3', 
                   color: 'white', 
                   border: 'none', 
                   padding: '10px 20px', 
                   borderRadius: '5px', 
-                  cursor: videoLoading ? 'not-allowed' : 'pointer',
+                  cursor: hookVideoLoading ? 'not-allowed' : 'pointer',
                   fontWeight: 'bold',
                   fontSize: '16px',
                   width: '100%'
                 }}
               >
-                {videoLoading ? 'Generando...' : '🎬 Generar Video'}
+                {hookVideoLoading ? 'Generando...' : '🎬 Generar Video'}
               </button>
           </form>
 
-          {videoLoading && (
+          {hookVideoLoading && (
             <div style={{ marginTop: '20px', marginBottom: '15px' }}>
               <div style={{ width: '100%', background: '#eee', borderRadius: '4px', height: '10px', overflow: 'hidden' }}>
                 <div style={{ 
-                  width: `${videoPercent}%`, 
+                  width: `${hookVideoPercent}%`, 
                   background: '#0070f3', 
                   height: '100%', 
                   transition: 'width 0.3s ease-in-out' 
                 }} />
               </div>
               <p style={{ textAlign: 'center', fontSize: '12px', margin: '5px 0 0', color: '#666' }}>
-                Generando ({videoModel}): {videoPercent.toFixed(1)}%
+                {videoStatus || 'Generando...'} ({hookVideoPercent.toFixed(1)}%)
               </p>
               <p style={{ textAlign: 'center', fontSize: '11px', color: '#999', marginTop: '2px' }}>
                  Tiempo Estimado: {videoModel.includes('pro') ? '5-10 minutos' : '1-3 minutos'}
@@ -1230,20 +1182,20 @@ export default function Home() {
             </div>
           )}
 
-          {error && activeTab === 'video' && (
+          {(error || hookVideoError) && activeTab === 'video' && (
             <div style={{ marginTop: '20px', background: '#fff2f2', border: '1px solid #ffcccc', color: '#cc0000', padding: '15px', borderRadius: '6px' }}>
-              <strong>Error:</strong> {error}
+              <strong>Error:</strong> {error || hookVideoError}
             </div>
           )}
 
-          {videoResult && (
+          {hookVideoResult && (
              <div style={{ marginTop: '20px', background: '#f9fff9', border: '1px solid #ccffcc', padding: '20px', borderRadius: '6px', textAlign: 'center' }}>
                  <h3 style={{ marginTop: 0, color: '#006600' }}>✅ Video Generado</h3>
                  <div style={{ width: '100%', aspectRatio: '16/9', background: '#000', marginBottom: '10px', borderRadius: '4px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                     <video controls src={videoResult.video_url} style={{ maxWidth: '100%', maxHeight: '100%' }} autoPlay />
+                     <video controls src={hookVideoResult.video_url} style={{ maxWidth: '100%', maxHeight: '100%' }} autoPlay />
                  </div>
-                 <p><a href={videoResult.video_url} target="_blank" style={{ color: '#0070f3' }}>Abrir Enlace Permanente</a></p>
+                 <p><a href={hookVideoResult.video_url} target="_blank" style={{ color: '#0070f3' }}>Abrir Enlace Permanente</a></p>
              </div>
           )}
 

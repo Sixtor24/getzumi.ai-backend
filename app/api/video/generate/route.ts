@@ -275,6 +275,27 @@ export async function POST(req: NextRequest) {
                             }
                             
                         } 
+                        // --- SORA LOOP LOGIC (> 15s) ---
+                        else if (model.startsWith("sora") && seconds && parseInt(seconds) > 15) {
+                             const { generateSoraLoop } = await import('../../../../lib/sora-generator');
+                             
+                             const protocol = req.headers.get('x-forwarded-proto') || 'http';
+                             const host = req.headers.get('host') || 'localhost:3000';
+
+                             finalVideoUrl = await generateSoraLoop({
+                                 prompt,
+                                 model,
+                                 totalSeconds: parseInt(seconds),
+                                 userId,
+                                 sendChunk,
+                                 aspectRatio: aspect_ratio || '16:9',
+                                 initialImage: input_image || (input_images && input_images.length > 0 ? input_images[0] : undefined),
+                                 apiKey,
+                                 baseUrl, // This needs to be passed, confirm it is in scope
+                                 reqHost: host,
+                                 reqProto: protocol
+                             });
+                        }
                         // --- STANDARD ASYNC LOGIC (Sora or Veo <= 15) ---
                         else {
                             const formData = new FormData();

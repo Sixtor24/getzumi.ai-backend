@@ -18,8 +18,16 @@ interface ApiResult {
 declare const puter: any;
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'image' | 'audio' | 'video'>('image');
+  const [activeTab, setActiveTab] = useState<'image' | 'audio' | 'video' | 'text'>('image');
   
+  // Text State
+  const [textPrompt, setTextPrompt] = useState('');
+  const [textSystem, setTextSystem] = useState('');
+  const [textModel, setTextModel] = useState('nano-banana');
+  const [textResult, setTextResult] = useState('');
+  const [textLoading, setTextLoading] = useState(false);
+  const [myTexts, setMyTexts] = useState<any[]>([]);
+
   // Audio State
   const [audioMode, setAudioMode] = useState<'tts' | 's2s'>('tts');
   const [audioProvider, setAudioProvider] = useState<'elevenlabs' | 'cartesia'>('elevenlabs');
@@ -30,7 +38,7 @@ export default function Home() {
 
   // Video State
   const [videoPrompt, setVideoPrompt] = useState<string>('');
-  const [videoModel, setVideoModel] = useState<string>('sora_video2');
+  const [videoModel, setVideoModel] = useState<string>('sora-2');
   const [videoDuration, setVideoDuration] = useState<number>(10);
   const [aspectRatio, setAspectRatio] = useState<string>('16:9');
   const [videoImages, setVideoImages] = useState<File[]>([]);
@@ -153,11 +161,27 @@ export default function Home() {
     }
   };
 
+  const fetchMyTexts = async () => {
+    setGalleryLoading(true);
+    try {
+      const res = await fetch('/api/my-texts');
+      const data = await res.json();
+      if (data.success) {
+        setMyTexts(data.texts);
+      }
+    } catch (e) {
+        console.error("Error fetching texts", e);
+    } finally {
+        setGalleryLoading(false);
+    }
+  };
+
   const toggleGallery = () => {
     if (!showGallery) {
       if (activeTab === 'image') fetchMyImages();
       else if (activeTab === 'audio') fetchMyAudios();
       else if (activeTab === 'video') fetchMyVideos();
+      else if (activeTab === 'text') fetchMyTexts();
     }
     setShowGallery(!showGallery);
   };
@@ -253,11 +277,13 @@ export default function Home() {
 
   const addVideoFiles = (files: File[]) => {
       const validFiles = files.filter(f => f.type.startsWith('image/'));
-      if (validFiles.length + videoImages.length > 2) {
-          alert("Máximo 2 imágenes permitidas para video (Inicio / Fin)");
+      const maxImages = videoModel.startsWith('sora') ? 1 : 2;
+      
+      if (validFiles.length + videoImages.length > maxImages) {
+          alert(`Máximo ${maxImages} imagen(es) permitida(s) para el modelo seleccionado.`);
           return;
       }
-      setVideoImages(prev => [...prev, ...validFiles].slice(0, 2));
+      setVideoImages(prev => [...prev, ...validFiles].slice(0, maxImages));
   };
 
   const removeVideoImage = (index: number) => {
@@ -490,6 +516,63 @@ export default function Home() {
     }
   };
 
+  const handleTextGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) { setError("Debes iniciar sesión"); return; }
+    
+    setTextLoading(true);
+    setTextResult('');
+    setError(null);
+    
+    try {
+        const response = await fetch('/api/text/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: textPrompt, model: textModel, system_prompt: textSystem })
+        });
+        
+        if (!response.ok) throw new Error(await response.text());
+        if (!response.body) throw new Error("No response body");
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = ""; // Buffer for potentially split chunks
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+            
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ""; // Keep the last incomplete line
+            
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('data: ')) {
+                    const dataStr = trimmed.replace('data: ', '');
+                    if (dataStr === '[DONE]') continue;
+                    
+                    try {
+                        const parsed = JSON.parse(dataStr);
+                        const content = parsed.choices?.[0]?.delta?.content || "";
+                        // Ignoring reasoning content for now in UI, just standard text
+                        if (content) {
+                            setTextResult(prev => prev + content);
+                        }
+                    } catch(e) {}
+                }
+            }
+        }
+        
+    } catch (e: any) {
+        setError(e.message);
+    } finally {
+        setTextLoading(false);
+    }
+  };
+
   return (
     <main style={{ maxWidth: '800px', margin: '40px auto', padding: '20px', background: 'white', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
       <h1 style={{ borderBottom: '2px solid #eaeaea', paddingBottom: '10px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -498,7 +581,7 @@ export default function Home() {
             <div style={{ fontSize: '14px', fontWeight: 'normal' }}>
                 👤 {user.username} 
                 <button onClick={toggleGallery} style={{ marginLeft: '10px', padding: '4px 8px', border: '1px solid #0070f3', borderRadius: '4px', background: showGallery ? '#0070f3' : 'transparent', color: showGallery ? 'white' : '#0070f3', cursor: 'pointer' }}>
-                  {activeTab === 'image' ? '🖼️ Mis Imágenes' : activeTab === 'audio' ? '🎧 Mis Audios' : '🎥 Mis Videos'}
+                  {activeTab === 'image' ? '🖼️ Mis Imágenes' : activeTab === 'audio' ? '🎧 Mis Audios' : activeTab === 'video' ? '🎥 Mis Videos' : '📝 Mis Textos'}
                 </button>
                 <button onClick={handleLogout} style={{ marginLeft: '10px', padding: '4px 8px', border: '1px solid #ccc', borderRadius: '4px', background: 'transparent', cursor: 'pointer' }}>Salir</button>
             </div>
@@ -509,16 +592,16 @@ export default function Home() {
       {showGallery && user && (
         <div style={{ marginBottom: '30px', padding: '20px', background: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce5ff' }}>
           <h3 style={{ marginTop: 0, display: 'flex', justifyContent: 'space-between' }}>
-            {activeTab === 'image' ? '🖼️ Mi Galería de Imágenes' : activeTab === 'audio' ? '🎧 Mi Biblioteca de Audio' : '🎥 Mi Biblioteca de Videos'}
-            <button onClick={activeTab === 'image' ? fetchMyImages : activeTab === 'audio' ? fetchMyAudios : fetchMyVideos} style={{ fontSize: '12px', padding: '2px 8px', cursor: 'pointer' }}>🔄 Actualizar</button>
+            {activeTab === 'image' ? '🖼️ Mi Galería de Imágenes' : activeTab === 'audio' ? '🎧 Mi Biblioteca de Audio' : activeTab === 'video' ? '🎥 Mi Biblioteca de Videos' : '📝 Mis Textos'}
+            <button onClick={activeTab === 'image' ? fetchMyImages : activeTab === 'audio' ? fetchMyAudios : activeTab === 'video' ? fetchMyVideos : fetchMyTexts} style={{ fontSize: '12px', padding: '2px 8px', cursor: 'pointer' }}>🔄 Actualizar</button>
           </h3>
           
           {galleryLoading ? (
             <p>Cargando...</p>
-          ) : (activeTab === 'image' ? myImages.length === 0 : activeTab === 'audio' ? myAudios.length === 0 : myVideos.length === 0) ? (
-            <p style={{ color: '#666', fontStyle: 'italic' }}>No tienes {activeTab === 'image' ? 'imágenes' : activeTab === 'audio' ? 'audios' : 'videos'} guardadas aún.</p>
+          ) : (activeTab === 'image' ? myImages.length === 0 : activeTab === 'audio' ? myAudios.length === 0 : activeTab === 'video' ? myVideos.length === 0 : myTexts.length === 0) ? (
+            <p style={{ color: '#666', fontStyle: 'italic' }}>No tienes {activeTab === 'image' ? 'imágenes' : activeTab === 'audio' ? 'audios' : activeTab === 'video' ? 'videos' : 'textos'} guardadas aún.</p>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '15px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: activeTab === 'text' ? '1fr' : 'repeat(auto-fill, minmax(150px, 1fr))', gap: '15px' }}>
               {activeTab === 'image' && myImages.map((img) => (
                 <div key={img.id} style={{ background: 'white', padding: '10px', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
                   <a href={img.view_url} target="_blank" rel="noopener noreferrer">
@@ -562,6 +645,18 @@ export default function Home() {
                   <p style={{ fontSize: '10px', color: '#888', margin: '2px 0 0' }}>
                      {new Date(video.created_at).toLocaleDateString()}
                   </p>
+                </div>
+              ))}
+
+              {activeTab === 'text' && myTexts.map((text) => (
+                <div key={text.id} style={{ background: 'white', padding: '15px', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', wordBreak: 'break-word', minWidth: 0 }}>
+                   <p style={{ fontWeight: 'bold', fontSize: '14px', marginBottom: '8px' }}>P: {text.prompt}</p>
+                   <div style={{ fontSize: '13px', color: '#333', maxHeight: '150px', overflowY: 'auto', whiteSpace: 'pre-wrap', background: '#f9f9f9', padding: '10px', borderRadius: '4px' }}>
+                       {text.content}
+                   </div>
+                   <p style={{ fontSize: '11px', color: '#888', marginTop: '10px' }}>
+                     {text.model} • {new Date(text.created_at).toLocaleString()}
+                   </p>
                 </div>
               ))}
             </div>
@@ -673,6 +768,12 @@ export default function Home() {
               >
                   🎥 Video (Sora)
               </button>
+              <button 
+                onClick={() => setActiveTab('text')}
+                style={{ padding: '10px 20px', background: 'transparent', border: 'none', borderBottom: activeTab === 'text' ? '2px solid #0070f3' : 'none', fontWeight: activeTab === 'text' ? 'bold' : 'normal', cursor: 'pointer' }}
+              >
+                  📝 Texto (LLM)
+              </button>
               <div style={{ flex: 1 }}></div>
               <button
                 onClick={() => toggleGallery()}
@@ -681,6 +782,82 @@ export default function Home() {
                  📂 {showGallery ? 'Ocultar Galería' : 'Ver Mis Generaciones'}
               </button>
           </div>
+      )}
+
+      {/* Gallery Section */}
+      {showGallery && user && (
+        <div style={{ marginBottom: '30px', padding: '20px', background: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce5ff' }}>
+          <h3 style={{ marginTop: 0, display: 'flex', justifyContent: 'space-between' }}>
+            {activeTab === 'image' ? '🖼️ Mi Galería de Imágenes' : activeTab === 'audio' ? '🎧 Mi Biblioteca de Audio' : activeTab === 'video' ? '🎥 Mi Biblioteca de Videos' : '📝 Mis Textos'}
+            <button onClick={activeTab === 'image' ? fetchMyImages : activeTab === 'audio' ? fetchMyAudios : activeTab === 'video' ? fetchMyVideos : fetchMyTexts} style={{ fontSize: '12px', padding: '2px 8px', cursor: 'pointer' }}>🔄 Actualizar</button>
+          </h3>
+          
+          {galleryLoading ? (
+            <p>Cargando...</p>
+          ) : (activeTab === 'image' ? myImages.length === 0 : activeTab === 'audio' ? myAudios.length === 0 : activeTab === 'video' ? myVideos.length === 0 : myTexts.length === 0) ? (
+            <p style={{ color: '#666', fontStyle: 'italic' }}>No tienes {activeTab === 'image' ? 'imágenes' : activeTab === 'audio' ? 'audios' : activeTab === 'video' ? 'videos' : 'textos'} guardadas aún.</p>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: activeTab === 'text' ? '1fr' : 'repeat(auto-fill, minmax(150px, 1fr))', gap: '15px' }}>
+              {activeTab === 'image' && myImages.map((img) => (
+                <div key={img.id} style={{ background: 'white', padding: '10px', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                  <a href={img.view_url} target="_blank" rel="noopener noreferrer">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img.view_url} alt={img.prompt} style={{ width: '100%', aspectRatio: '1/1', objectFit: 'cover', borderRadius: '4px', border: '1px solid #eee' }} />
+                  </a>
+                  <p style={{ fontSize: '11px', margin: '5px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 'bold' }} title={img.prompt}>
+                    {img.prompt}
+                  </p>
+                  <p style={{ fontSize: '10px', color: '#888', margin: '2px 0 0' }}>
+                    {new Date(img.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              ))}
+              
+              {activeTab === 'audio' && myAudios.map((audio) => (
+                <div key={audio.id} style={{ background: 'white', padding: '10px', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                   <div style={{ width: '100%', aspectRatio: '1/1', background: '#eee', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', marginBottom: '5px' }}>
+                       <span style={{ fontSize: '40px' }}>🎵</span>
+                   </div>
+                   {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                   <audio controls src={audio.view_url} style={{ width: '100%', height: '30px' }} />
+                   <p style={{ fontSize: '11px', margin: '5px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 'bold' }} title={audio.prompt}>
+                    {audio.prompt}
+                  </p>
+                  <p style={{ fontSize: '10px', color: '#888', margin: '2px 0 0' }}>
+                     {audio.provider} • {new Date(audio.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              ))}
+
+              {activeTab === 'video' && myVideos.map((video) => (
+                <div key={video.id} style={{ background: 'white', padding: '10px', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                   <div style={{ width: '100%', aspectRatio: '16/9', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', marginBottom: '5px' }}>
+                       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                       <video controls src={video.video_url} style={{ width: '100%', height: '100%' }} />
+                   </div>
+                   <p style={{ fontSize: '11px', margin: '5px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 'bold' }} title={video.prompt}>
+                    {video.prompt}
+                  </p>
+                  <p style={{ fontSize: '10px', color: '#888', margin: '2px 0 0' }}>
+                     {new Date(video.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              ))}
+
+              {activeTab === 'text' && myTexts.map((text) => (
+                <div key={text.id} style={{ background: 'white', padding: '15px', borderRadius: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', wordBreak: 'break-word', minWidth: 0 }}>
+                   <p style={{ fontWeight: 'bold', fontSize: '14px', marginBottom: '8px' }}>P: {text.prompt}</p>
+                   <div style={{ fontSize: '13px', color: '#333', maxHeight: '150px', overflowY: 'auto', whiteSpace: 'pre-wrap', background: '#f9f9f9', padding: '10px', borderRadius: '4px' }}>
+                       {text.content}
+                   </div>
+                   <p style={{ fontSize: '11px', color: '#888', marginTop: '10px' }}>
+                     {text.model} • {new Date(text.created_at).toLocaleString()}
+                   </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {activeTab === 'image' && (
@@ -1048,24 +1225,24 @@ export default function Home() {
             <div style={{ marginBottom: '15px' }}>
                 <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>
                     Duración: {videoDuration} segundos
-                    {videoDuration > 15 && <span style={{ color: 'orange', marginLeft: '10px', fontSize: '12px' }}>(Experimental)</span>}
+                    {videoDuration > 15 && <span style={{ color: '#0070f3', marginLeft: '10px', fontSize: '12px' }}>(Modo Extendido Activado)</span>}
                 </label>
                 <input 
                   type="range" 
-                  min="5" 
-                  max={videoModel === 'sora-2-pro' ? "60" : "15"} // Limit regular Sora to 15s? Or allow it? Docs say 15. Pro might allow more.
+                  min="10" 
+                  max="60"
                   step="5"
                   value={videoDuration}
                   onChange={(e) => setVideoDuration(parseInt(e.target.value))}
                   style={{ width: '100%' }}
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#666' }}>
-                    <span>5s</span>
+                    <span>10s</span>
                     <span>15s (Std)</span>
-                    {videoModel === 'sora-2-pro' && <span>60s (Pro?)</span>}
+                    <span>60s (Loop)</span>
                 </div>
                 <p style={{ fontSize: '11px', color: '#888', marginTop: '2px' }}>
-                   * La documentación oficial lista 10s y 15s. Valores más altos pueden no ser respetados por todos los modelos.
+                   * Para videos de +15s, el sistema generará múltiples segmentos secuenciales automáticamente.
                 </p>
             </div>
             )}
@@ -1106,10 +1283,10 @@ export default function Home() {
                    />
                    <label htmlFor="video-file-upload" style={{ cursor: 'pointer', display: 'block' }}>
                      <p style={{ margin: 0, fontWeight: 'bold', color: '#555' }}>
-                       Arrastra 1 o 2 imágenes (Inicio / Fin)
+                       Arrastra imagen de referencia
                      </p>
                     <span style={{ fontSize: '12px', color: '#888' }}>
-                        (Veo: soporta Inicio y Fin. Sora: Solo Referencia inicial)
+                        {videoModel.startsWith('sora') ? '(Sora: Máz 1 imagen inicial)' : '(Veo: Máx 2 imágenes - Inicio/Fin)'}
                     </span>
                    </label>
 
@@ -1200,6 +1377,90 @@ export default function Home() {
           )}
 
       </div>
+      )}
+
+      {activeTab === 'text' && (
+        <div style={{ border: '1px solid #ddd', borderRadius: '6px', padding: '20px', marginBottom: '20px', opacity: !user ? 0.5 : 1, pointerEvents: !user ? 'none' : 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
+                <span style={{ background: '#0070f3', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold', marginRight: '10px' }}>POST</span>
+                <code style={{ background: '#f5f5f5', padding: '2px 6px', borderRadius: '4px' }}>/api/text/generate</code>
+            </div>
+
+            <p style={{ color: '#666', marginBottom: '15px', fontSize: '14px' }}>
+                Genera texto, código o historias utilizando modelos LLM avanzados (DeepSeek, Gemini, GPT) a través de APIYi.
+            </p>
+
+            <form onSubmit={handleTextGenerate}>
+                <div style={{ marginBottom: '15px', display: 'flex', gap: '20px' }}>
+                     <div style={{ flex: 1 }}>
+                         <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>Modelo:</label>
+                         <select 
+                            value={textModel}
+                            onChange={(e) => setTextModel(e.target.value)}
+                            style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc' }}
+                         >
+                            <option value="nano-banana">Nano Banana (Funcionando)</option>
+                            <option value="deepseek-chat">DeepSeek V3 (Sin Cuota)</option>
+                            <option value="gemini-3-pro-preview">Gemini 3 Pro (Sin Cuota)</option>
+                            <option value="gpt-4o">GPT-4o (Sin Cuota)</option>
+                         </select>
+                     </div>
+                </div>
+
+                <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>System Prompt (Contexto/Persona):</label>
+                    <textarea 
+                        value={textSystem}
+                        onChange={(e) => setTextSystem(e.target.value)}
+                        placeholder="Eres un asistente útil y experto en..."
+                        style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', minHeight: '60px', fontFamily: 'inherit' }}
+                    />
+                </div>
+
+                <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>User Prompt (Tu Mensaje):</label>
+                    <textarea 
+                        value={textPrompt}
+                        onChange={(e) => setTextPrompt(e.target.value)}
+                        placeholder="Escribe tu pregunta o instrucción aquí..."
+                        style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', minHeight: '120px', fontFamily: 'inherit' }}
+                        required
+                    />
+                </div>
+
+                <button 
+                    type="submit" 
+                    disabled={textLoading}
+                    style={{ 
+                        background: textLoading ? '#ccc' : '#0070f3', 
+                        color: 'white', 
+                        border: 'none', 
+                        padding: '10px 20px', 
+                        borderRadius: '5px', 
+                        cursor: textLoading ? 'not-allowed' : 'pointer',
+                        fontWeight: 'bold',
+                        fontSize: '16px',
+                        width: '100%',
+                        marginBottom: '20px'
+                    }}
+                >
+                    {textLoading ? 'Generando...' : '📝 Generar Texto'}
+                </button>
+            </form>
+
+            {(textResult || textLoading) && (
+                <div style={{ background: '#f8f9fa', padding: '20px', borderRadius: '8px', border: '1px solid #e9ecef' }}>
+                    <h3 style={{ marginTop: 0, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        Resultado 
+                        {textLoading && <span style={{ fontSize: '12px', fontWeight: 'normal', color: '#666' }}>(Escribiendo...)</span>}
+                    </h3>
+                    <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6', fontSize: '15px', color: '#333' }}>
+                        {textResult}
+                        {textLoading && <span className="cursor-blink">|</span>}
+                    </div>
+                </div>
+            )}
+        </div>
       )}
 
   </main>

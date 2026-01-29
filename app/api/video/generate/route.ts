@@ -179,13 +179,28 @@ export async function POST(req: NextRequest) {
 
                                 
                                 // Attach images
+                                // Veo Quick Start: "input_reference" is key.
                                 for (let j = 0; j < currentImages.length; j++) {
                                     const b64 = currentImages[j];
                                     if (!b64 || typeof b64 !== 'string') continue;
                                     const base64Data = b64.replace(/^data:image\/\w+;base64,/, "");
                                     const buffer = Buffer.from(base64Data, 'base64');
                                     const blob = new Blob([buffer], { type: 'image/jpeg' });
+                                    // Veo API expects 'input_reference' for image-to-video
                                     formData.append("input_reference", blob, `ref_${i}_${j}.jpg`);
+                                }
+                                
+                                // Veo Prompt Logic for Continuity
+                                let currentPrompt = prompt;
+                                if (i > 0) {
+                                    currentPrompt = `${prompt}. Seamlessly continue the motion and narrative from the reference starting frame. Develop the scene further.`;
+                                }
+                                // We are already appending model and input_reference. Now append prompt.
+                                // NOTE: formData.set() would overwrite if we had added it before loop, but we create fresh formData each iter
+                                // But wait, in lines above I see: formData.append("prompt", prompt); 
+                                // I should override it here for i > 0
+                                if (i > 0) {
+                                    formData.set("prompt", currentPrompt);
                                 }
 
                                 const submitRes = await fetch(`${baseUrl}/v1/videos`, {
@@ -233,13 +248,22 @@ export async function POST(req: NextRequest) {
                                 videoSegments.push(segPath);
                                 sendChunk(`Segmento guardado.\n`);
 
-                                // 4. Prepare next iteration (Extract Frame)
+                            // 4. Prepare next iteration (Extract Frame)
                                 if (i < iterations - 1) {
                                     sendChunk(`Extrayendo frame de referencia para el siguiente tramo...\n`);
                                     try { 
                                         const lastFrameBuffer = await extractLastFrame(segPath);
                                         const b64Frame = "data:image/jpeg;base64," + lastFrameBuffer.toString('base64');
-                                        currentImages = [b64Frame]; // Next segment uses ONLY the last frame of previous
+                                        
+                                        // Veo logic: Uses 'input_reference' for start/end frames.
+                                        // Since we are CHAINING, we want the LAST frame of Segment A to be the FIRST frame of Segment B.
+                                        // So we replace currentImages for the next iteration.
+                                        
+                                        // IMPORTANT: Veo supports 2 images (Start & End).
+                                        // For chain continuity, we only provide the Start image (the frame we just extracted).
+                                        // We do NOT want to constrain the End of the next segment, we want it to EVOLVE.
+                                        currentImages = [b64Frame]; 
+                                        
                                     } catch (err: any) {
                                         sendChunk(`Warn: Error extrayendo frame: ${err.message}. Usando configuración previa.\n`);
                                     }
@@ -297,39 +321,53 @@ export async function POST(req: NextRequest) {
                              });
                         }
                         // --- STANDARD ASYNC LOGIC (Sora or Veo <= 15) ---
+                        // --- STANDARD ASYNC LOGIC (Sora or Veo <= 15s or Default) ---
                         else {
                             const formData = new FormData();
-                            formData.append("prompt", prompt);
                             
                             // Images Check
                             const imagesToProcess = input_images && input_images.length > 0 ? input_images : (input_image ? [input_image] : []);
-                            const hasImages = imagesToProcess.length > 0;
+                            console.log(`[Veo/Sora Input] ${imagesToProcess.length} images provided.`);
 
                             let finalModel = model;
                             if (model.startsWith('veo')) {
+                                // Just a prompt pass-through if no special logic needed? 
+                                // Actually, standard logic handles model renaming
+                                const hasImages = imagesToProcess.length > 0;
                                 finalModel = getVeoModelName(model, aspect_ratio || '16:9', hasImages);
                             }
                             formData.append("model", finalModel);
+                            
+                            // Adjust prompt? No, standard prompt is fine.
+                            formData.append("prompt", prompt);
 
                             // Sora Specific
                             if (model.startsWith("sora-")) {
-                                formData.append("size", videoSize); // Use mapped size
+                                formData.append("size", videoSize); 
                                 if (seconds) formData.append("seconds", seconds.toString());
                                 else formData.append("seconds", "15");
                             }
 
-                            // Veo Specific: No valid params besides model/prompt/input_reference
-                            
+                            // Veo Specific: Standard
                             // Attach Images
                             for (let i = 0; i < imagesToProcess.length; i++) {
                                 const b64 = imagesToProcess[i];
-                                const base64Data = b64.replace(/^data:image\/\w+;base64,/, "");
-                                const buffer = Buffer.from(base64Data, 'base64');
-                                const blob = new Blob([buffer], { type: 'image/jpeg' });
-                                formData.append("input_reference", blob, `ref_img_${i}.jpg`);
+                                // Basic validation
+                                if(typeof b64 === 'string' && b64.startsWith('data:image')) {
+                                    const base64Data = b64.replace(/^data:image\/\w+;base64,/, "");
+                                    const buffer = Buffer.from(base64Data, 'base64');
+                                    const blob = new Blob([buffer], { type: 'image/jpeg' });
+                                    
+                                    if(model.startsWith('sora')) {
+                                        formData.append("input_image", blob, `input_${i}.jpg`);
+                                    } else {
+                                        // Veo uses 'input_reference'
+                                        formData.append("input_reference", blob, `ref_${i}.jpg`);
+                                    }
+                                }
                             }
 
-                            console.log(`[Async] Submitting single task for ${finalModel} (Input: ${model}, Aspect: ${aspect_ratio || '16:9'})...`);
+                            console.log(`[Async] Submitting single task for ${finalModel}...`);
                             const submitRes = await fetch(`${baseUrl}/v1/videos`, {
                                 method: 'POST',
                                 headers: { 'Authorization': `Bearer ${apiKey}` },

@@ -29,7 +29,7 @@
     "undici": "^7.19.0"
   },
   "devDependencies": {
-    "@prisma/client": "^7.3.0",
+    "@prisma/client": "^5.22.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie": "^0.6.0",
     "@types/fluent-ffmpeg": "^2.1.28",
@@ -41,7 +41,7 @@
     "@types/swagger-ui-react": "^5.18.0",
     "dotenv": "^17.2.3",
     "jest": "^30.2.0",
-    "prisma": "^7.3.0",
+    "prisma": "^5.22.0",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "5.9.3"

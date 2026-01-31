@@ -1,6 +1,5 @@
-
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../lib/mongodb';
+import prisma from '../../../lib/prisma';
 import jwt from 'jsonwebtoken';
 
 export async function GET(request: NextRequest) {
@@ -21,39 +20,21 @@ export async function GET(request: NextRequest) {
              return NextResponse.json({ success: false, message: "Invalid token" }, { status: 401 });
         }
 
-        const client = await clientPromise;
-        const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
-        const collection = db.collection("generated_audios");
-
-        // Find audios for this user.
-        // We project only necessary fields to reduce payload size.
-        const audios = await collection.find(
-            { user_id: userId },
-            { 
-                projection: { 
-                    prompt: 1, 
-                    provider: 1, 
-                    created_at: 1,
-                    mime_type: 1 
-                },
-                sort: { created_at: -1 } // Newest first
-            }
-        ).toArray();
-
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin;
-
-        const formattedAudios = audios.map(audio => ({
-            id: audio._id.toString(),
-            prompt: audio.prompt,
-            provider: audio.provider,
-            created_at: audio.created_at,
-            view_url: `${baseUrl}/api/view-audio/${audio._id.toString()}`
-        }));
+        const audios = await prisma.audio.findMany({
+            where: { userId: userId },
+            orderBy: { createdAt: 'desc' },
+            take: 50
+        });
 
         return NextResponse.json({
             success: true,
-            count: formattedAudios.length,
-            audios: formattedAudios
+            audios: audios.map(aud => ({
+                id: aud.id,
+                text: aud.text,
+                voice: aud.voice,
+                audio_url: aud.audioUrl,
+                created_at: aud.createdAt
+            }))
         });
 
     } catch (error) {

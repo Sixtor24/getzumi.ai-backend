@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../../lib/mongodb';
+import prisma from '../../../../lib/prisma';
 import jwt from 'jsonwebtoken';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
@@ -414,14 +414,14 @@ export async function POST(req: NextRequest) {
                             sendChunk(`\n\nDONE: [Download Video](${finalVideoUrl})`);
                             
                             try {
-                                const client = await clientPromise;
-                                const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
-                                await db.collection("generated_videos").insertOne({
-                                    user_id: userId,
-                                    prompt,
-                                    model,
-                                    video_url: finalVideoUrl,
-                                    created_at: new Date()
+                                await prisma.video.create({
+                                    data: {
+                                        userId,
+                                        prompt,
+                                        model,
+                                        videoUrl: finalVideoUrl,
+                                        status: "completed"
+                                    }
                                 });
                                 console.log(`Saved video to DB: ${finalVideoUrl}`);
                             } catch (dbErr) {

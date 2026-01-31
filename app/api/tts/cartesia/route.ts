@@ -1,8 +1,6 @@
-
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../../lib/mongodb';
+import prisma from '../../../../lib/prisma';
 import jwt from 'jsonwebtoken';
-import { ObjectId, Binary } from 'mongodb';
 
 export async function POST(req: NextRequest) {
     try {
@@ -64,30 +62,24 @@ export async function POST(req: NextRequest) {
         const arrayBuffer = await cartesiaRes.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
         // Store as Binary in Mongo usually, but utilizing Base64 string for consistency with previous Image implementation is easier for JSON transfer
-        // However, audio is larger. GridFS is better for large files. 
-        // For simplicity in this demo context, we'll store Binary in a BSON field (limit 16MB). MP3 clips are usually small.
+        // 5. Save audio URL to database
+        // Convert buffer to base64 URL for now (in production, upload to cloud storage)
+        const base64Audio = `data:audio/mpeg;base64,${buffer.toString('base64')}`;
         
-        // 5. Save to MongoDB
-        const client = await clientPromise;
-        const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
-        
-        const doc = {
-            user_id: userId,
-            prompt: text,
-            provider: 'cartesia',
-            model: 'sonic-english',
-            voice_id: voice_id || "default",
-            audio_data: new Binary(buffer),
-            mime_type: 'audio/mpeg',
-            created_at: new Date()
-        };
-
-        const result = await db.collection("generated_audios").insertOne(doc);
+        const audio = await prisma.audio.create({
+            data: {
+                userId,
+                text,
+                voice: voice_id || "default",
+                audioUrl: base64Audio,
+                status: "completed"
+            }
+        });
 
         return NextResponse.json({
             success: true,
-            audio_id: result.insertedId.toString(),
-            view_url: `${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/view-audio/${result.insertedId.toString()}`
+            audio_id: audio.id,
+            audio_url: audio.audioUrl
         });
 
     } catch (error) {

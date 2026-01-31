@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../../lib/mongodb';
+import prisma from '../../../../lib/prisma';
 import jwt from 'jsonwebtoken';
 
 export async function POST(req: NextRequest) {
@@ -115,15 +115,14 @@ export async function POST(req: NextRequest) {
                     // SAVE TO DB ON COMPLETE
                     if (fullGeneratedText.trim().length > 0) {
                         try {
-                            const client = await clientPromise;
-                            const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
-                            await db.collection("generated_texts").insertOne({
-                                user_id: userId,
-                                prompt: prompt,
-                                system_prompt: system_prompt,
-                                model: model,
-                                content: fullGeneratedText,
-                                created_at: new Date()
+                            await prisma.text.create({
+                                data: {
+                                    userId: userId,
+                                    prompt: prompt,
+                                    model: model || "nano-banana",
+                                    content: fullGeneratedText,
+                                    status: "completed"
+                                }
                             });
                             console.log("Saved generated text to DB");
                         } catch (err) {

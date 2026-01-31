@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../../lib/mongodb';
+import prisma from '../../../../lib/prisma';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { serialize } from 'cookie';
@@ -13,13 +13,14 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ success: false, message: "Missing identifier or password" }, { status: 400 });
         }
 
-        const client = await clientPromise;
-        const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
-        const usersCollection = db.collection("users");
-
         // 1. Find User by Email OR Username
-        const user = await usersCollection.findOne({
-            $or: [{ email: identifier }, { username: identifier }]
+        const user = await prisma.user.findFirst({
+            where: {
+                OR: [
+                    { email: identifier },
+                    { username: identifier }
+                ]
+            }
         });
 
         if (!user) {
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
 
         // 3. Generate Permanent Session Token
         const token = jwt.sign(
-            { userId: user._id.toString(), username: user.username, email: user.email },
+            { userId: user.id, username: user.username, email: user.email },
             process.env.JWT_SECRET || 'fallback-secret-key-change-me',
             { expiresIn: '3650d' } // ~10 years
         );
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
             message: "Login successful",
             token: token,
             user: { 
-                id: user._id.toString(), 
+                id: user.id, 
                 username: user.username, 
                 email: user.email, 
                 fullName: user.fullName 

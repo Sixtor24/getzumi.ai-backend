@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../../lib/mongodb';
+import prisma from '../../../../lib/prisma';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { serialize } from 'cookie';
@@ -14,13 +14,14 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ success: false, message: "Missing required fields" }, { status: 400 });
         }
 
-        const client = await clientPromise;
-        const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
-        const usersCollection = db.collection("users");
-
         // 2. Check for existing user (username OR email)
-        const existingUser = await usersCollection.findOne({
-            $or: [{ email: email }, { username: username }]
+        const existingUser = await prisma.user.findFirst({
+            where: {
+                OR: [
+                    { email: email },
+                    { username: username }
+                ]
+            }
         });
 
         if (existingUser) {
@@ -33,17 +34,16 @@ export async function POST(request: NextRequest) {
         const hashedPassword = await bcrypt.hash(password, salt);
 
         // 4. Create User
-        const newUser = {
-            fullName,
-            username,
-            email,
-            password: hashedPassword,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        };
+        const newUser = await prisma.user.create({
+            data: {
+                fullName,
+                username,
+                email,
+                password: hashedPassword,
+            }
+        });
 
-        const result = await usersCollection.insertOne(newUser);
-        const userId = result.insertedId.toString();
+        const userId = newUser.id;
 
         // 5. Generate Permanent Session Token (JWT)
         // Note: "Permanent" usually means a very long expiry. Let's set it to 10 years.

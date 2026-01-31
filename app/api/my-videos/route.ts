@@ -1,6 +1,5 @@
-
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../lib/mongodb';
+import prisma from '../../../lib/prisma';
 import jwt from 'jsonwebtoken';
 
 export async function GET(req: NextRequest) {
@@ -16,23 +15,20 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ success: false, message: "Invalid session" }, { status: 401 });
         }
 
-        const client = await clientPromise;
-        const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
-
-        const videos = await db.collection("generated_videos")
-            .find({ user_id: userId })
-            .sort({ created_at: -1 })
-            .limit(50)
-            .toArray();
+        const videos = await prisma.video.findMany({
+            where: { userId: userId },
+            orderBy: { createdAt: 'desc' },
+            take: 50
+        });
 
         return NextResponse.json({
             success: true,
             videos: videos.map(vid => ({
-                id: vid._id.toString(),
+                id: vid.id,
                 prompt: vid.prompt,
                 model: vid.model,
-                video_url: vid.video_url,
-                created_at: vid.created_at
+                video_url: vid.videoUrl,
+                created_at: vid.createdAt
             }))
         });
 

@@ -1,28 +1,18 @@
-
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../../lib/mongodb';
-import { ObjectId } from 'mongodb';
+import prisma from '../../../../lib/prisma';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
     try {
-        const id = new ObjectId(params.id);
-        const client = await clientPromise;
-        const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
-        
-        const doc = await db.collection("generated_audios").findOne({ _id: id });
+        const audio = await prisma.audio.findUnique({
+            where: { id: params.id }
+        });
 
-        if (!doc) {
+        if (!audio) {
             return new NextResponse("Not Found", { status: 404 });
         }
 
-        const buffer = doc.audio_data.buffer;
-
-        return new NextResponse(buffer, {
-            headers: {
-                'Content-Type': doc.mime_type || 'audio/mpeg',
-                'Content-Length': buffer.length.toString()
-            }
-        });
+        // Redirect to the audio URL
+        return NextResponse.redirect(audio.audioUrl);
 
     } catch (e) {
         console.error("View Audio Error", e);

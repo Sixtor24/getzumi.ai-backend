@@ -1,8 +1,6 @@
-
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../lib/mongodb';
+import prisma from '../../../lib/prisma';
 import jwt from 'jsonwebtoken';
-import { Binary } from 'mongodb';
 
 export async function POST(req: NextRequest) {
     try {
@@ -17,35 +15,26 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: false, message: "Invalid session" }, { status: 401 });
         }
 
-        const { audioData, prompt, provider, mimeType } = await req.json();
+        const { audioUrl, text, voice } = await req.json();
 
-        if (!audioData || !provider) {
-             return NextResponse.json({ success: false, message: "Missing audio data or provider" }, { status: 400 });
+        if (!audioUrl || !text) {
+             return NextResponse.json({ success: false, message: "Missing audio URL or text" }, { status: 400 });
         }
 
-        // Convert Base64 to Buffer
-        // audioData might have prefix like "data:audio/mpeg;base64,"
-        const base64Content = audioData.split(';base64,').pop();
-        const buffer = Buffer.from(base64Content, 'base64');
-
-        const client = await clientPromise;
-        const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
-
-        const doc = {
-            user_id: userId,
-            prompt: prompt || "Audio Upload",
-            provider: provider,
-            model: 'unknown',
-            audio_data: new Binary(buffer),
-            mime_type: mimeType || 'audio/mpeg',
-            created_at: new Date()
-        };
-
-        const result = await db.collection("generated_audios").insertOne(doc);
+        const audio = await prisma.audio.create({
+            data: {
+                userId,
+                text,
+                voice: voice || 'default',
+                audioUrl,
+                status: "completed"
+            }
+        });
 
         return NextResponse.json({
             success: true,
-            view_url: `/api/view-audio/${result.insertedId.toString()}`
+            audio_id: audio.id,
+            audio_url: audio.audioUrl
         });
 
     } catch (e) {

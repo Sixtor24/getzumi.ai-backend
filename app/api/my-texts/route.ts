@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../lib/mongodb';
+import prisma from '../../../lib/prisma';
 import jwt from 'jsonwebtoken';
 
 export async function GET(req: NextRequest) {
@@ -15,23 +15,20 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ success: false, message: "Invalid session" }, { status: 401 });
         }
 
-        const client = await clientPromise;
-        const db = client.db(process.env.MONGO_DB_NAME || "zumidb");
-
-        const texts = await db.collection("generated_texts")
-            .find({ user_id: userId })
-            .sort({ created_at: -1 })
-            .limit(50)
-            .toArray();
+        const texts = await prisma.text.findMany({
+            where: { userId: userId },
+            orderBy: { createdAt: 'desc' },
+            take: 50
+        });
 
         return NextResponse.json({
             success: true,
-            texts: texts.map(t => ({
-                id: t._id.toString(),
-                prompt: t.prompt,
-                model: t.model,
-                content: t.content, // Return full content or snippet? User wants "recuperar", probably full.
-                created_at: t.created_at
+            texts: texts.map(txt => ({
+                id: txt.id,
+                prompt: txt.prompt,
+                model: txt.model,
+                content: txt.content,
+                created_at: txt.createdAt
             }))
         });
 

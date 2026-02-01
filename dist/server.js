@@ -6,6 +6,7 @@ import imageRoutes from './routes/images.js';
 import videoRoutes from './routes/videos.js';
 import audioRoutes from './routes/audios.js';
 import textRoutes from './routes/texts.js';
+import projectRoutes from './routes/projects.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 // CORS configuration
@@ -48,6 +49,7 @@ app.use('/api', imageRoutes);
 app.use('/api', videoRoutes);
 app.use('/api', audioRoutes);
 app.use('/api', textRoutes);
+app.use('/api/projects', projectRoutes);
 // 404 handler
 app.use((req, res) => {
     res.status(404).json({ success: false, message: 'Route not found' });
@@ -61,5 +63,6 @@ app.listen(PORT, () => {
     console.log(`🚀 Express server running on port ${PORT}`);
     console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`🌐 CORS enabled for: ${allowedOrigins.join(', ')}`);
+    console.log(`✨ Project & Image endpoints active`);
 });
 //# sourceMappingURL=server.js.map

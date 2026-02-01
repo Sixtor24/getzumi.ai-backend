@@ -36,8 +36,17 @@ router.post('/generate', async (req, res) => {
 // Save Image
 router.post('/save-image', async (req, res) => {
     try {
-        const token = req.cookies.auth_token;
+        // Accept token from Authorization header or cookies
+        let token = req.cookies.auth_token;
+        // If not in cookies, check Authorization header
+        if (!token && req.headers.authorization) {
+            const authHeader = req.headers.authorization;
+            if (authHeader.startsWith('Bearer ')) {
+                token = authHeader.substring(7);
+            }
+        }
         if (!token) {
+            console.log('No auth token found');
             return res.status(401).json({
                 success: false,
                 message: "Authentication required. Please sign in or register to save images."
@@ -90,9 +99,16 @@ router.post('/save-image', async (req, res) => {
 // Get My Images
 router.get('/my-images', async (req, res) => {
     try {
-        const token = req.cookies.auth_token;
+        // Accept token from Authorization header or cookies
+        let token = req.cookies.auth_token;
+        if (!token && req.headers.authorization) {
+            const authHeader = req.headers.authorization;
+            if (authHeader.startsWith('Bearer ')) {
+                token = authHeader.substring(7);
+            }
+        }
         if (!token) {
-            return res.status(401).json({ success: false, message: "PRO FEATURE ONLY" });
+            return res.status(401).json({ success: false, message: "Authentication required" });
         }
         let userId;
         try {
@@ -100,7 +116,7 @@ router.get('/my-images', async (req, res) => {
             userId = decoded.userId;
         }
         catch (e) {
-            return res.status(401).json({ success: false, message: "Invalid token" });
+            return res.status(401).json({ success: false, message: "Invalid session" });
         }
         const images = await prisma.image.findMany({
             where: { userId },
@@ -123,6 +139,53 @@ router.get('/my-images', async (req, res) => {
     catch (error) {
         console.error("Get Images Error:", error);
         return res.status(500).json({ success: false, message: "Failed to fetch images" });
+    }
+});
+// Delete Image
+router.delete('/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        // Accept token from Authorization header or cookies
+        let token = req.cookies.auth_token;
+        if (!token && req.headers.authorization) {
+            const authHeader = req.headers.authorization;
+            if (authHeader.startsWith('Bearer ')) {
+                token = authHeader.substring(7);
+            }
+        }
+        if (!token) {
+            return res.status(401).json({ success: false, message: "Authentication required" });
+        }
+        let userId;
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key-change-me');
+            userId = decoded.userId;
+        }
+        catch (e) {
+            return res.status(401).json({ success: false, message: "Invalid session" });
+        }
+        // Verify the image belongs to the user
+        const image = await prisma.image.findUnique({
+            where: { id }
+        });
+        if (!image) {
+            return res.status(404).json({ success: false, message: "Image not found" });
+        }
+        if (image.userId !== userId) {
+            return res.status(403).json({ success: false, message: "Unauthorized to delete this image" });
+        }
+        // Delete the image
+        await prisma.image.delete({
+            where: { id }
+        });
+        return res.status(200).json({
+            success: true,
+            message: "Image deleted successfully"
+        });
+    }
+    catch (error) {
+        console.error("Delete Image Error:", error);
+        return res.status(500).json({ success: false, message: "Failed to delete image" });
     }
 });
 // View Image

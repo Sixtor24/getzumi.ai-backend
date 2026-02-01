@@ -7,6 +7,7 @@ const router = Router();
 // Sign Up
 router.post('/signup', async (req, res) => {
     try {
+        console.log('Signup request body:', req.body);
         const { fullName, username, email, password } = req.body;
         if (!fullName || !username || !email || !password) {
             return res.status(400).json({ success: false, message: "Missing required fields" });
@@ -34,6 +35,13 @@ router.post('/signup', async (req, res) => {
             }
         });
         const userId = newUser.id;
+        // Create default folder for new user
+        await prisma.folder.create({
+            data: {
+                userId: userId,
+                name: 'Nuevo proyecto'
+            }
+        });
         const token = jwt.sign({ userId: userId, username: username, email: email }, process.env.JWT_SECRET || 'fallback-secret-key-change-me', { expiresIn: '3650d' });
         const cookie = serialize('auth_token', token, {
             httpOnly: true,

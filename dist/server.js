@@ -1,11 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import authRoutes from './routes/auth';
-import imageRoutes from './routes/images';
-import videoRoutes from './routes/videos';
-import audioRoutes from './routes/audios';
-import textRoutes from './routes/texts';
+import authRoutes from './routes/auth.js';
+import imageRoutes from './routes/images.js';
+import videoRoutes from './routes/videos.js';
+import audioRoutes from './routes/audios.js';
+import textRoutes from './routes/texts.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 // CORS configuration

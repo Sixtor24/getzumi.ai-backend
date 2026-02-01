@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
-import prisma from '../lib/prisma';
+import prisma from '../lib/prisma.js';
 import jwt from 'jsonwebtoken';
-import { GeminiImageService } from '../lib/gemini';
+import { GeminiImageService } from '../lib/gemini.js';
 import sharp from 'sharp';
 
 const router = Router();

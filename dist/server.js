@@ -43,13 +43,13 @@ app.use((req, res, next) => {
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
-// API Routes
+// API Routes - Order matters! More specific routes first
 app.use('/api/auth', authRoutes);
-app.use('/api', imageRoutes);
-app.use('/api', videoRoutes);
-app.use('/api', audioRoutes);
-app.use('/api', textRoutes);
 app.use('/api/projects', projectRoutes);
+app.use('/api/images', imageRoutes);
+app.use('/api/videos', videoRoutes);
+app.use('/api/audios', audioRoutes);
+app.use('/api/texts', textRoutes);
 // 404 handler
 app.use((req, res) => {
     res.status(404).json({ success: false, message: 'Route not found' });

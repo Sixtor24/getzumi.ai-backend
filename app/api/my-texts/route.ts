@@ -1,18 +1,21 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import prisma from '../../../lib/prisma';
 import jwt from 'jsonwebtoken';
+import { handleCorsResponse, handleCorsError } from '../../../lib/cors';
 
 export async function GET(req: NextRequest) {
+    const origin = req.headers.get('origin');
+    
     try {
         const token = req.cookies.get('auth_token')?.value;
-        if (!token) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+        if (!token) return handleCorsError("Unauthorized", 401, origin);
 
         let userId: string;
         try {
             const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key-change-me');
             userId = decoded.userId;
         } catch (e) {
-            return NextResponse.json({ success: false, message: "Invalid session" }, { status: 401 });
+            return handleCorsError("Invalid session", 401, origin);
         }
 
         const texts = await prisma.text.findMany({
@@ -21,7 +24,7 @@ export async function GET(req: NextRequest) {
             take: 50
         });
 
-        return NextResponse.json({
+        return handleCorsResponse({
             success: true,
             texts: texts.map(txt => ({
                 id: txt.id,
@@ -30,10 +33,10 @@ export async function GET(req: NextRequest) {
                 content: txt.content,
                 created_at: txt.createdAt
             }))
-        });
+        }, 200, origin);
 
     } catch (error) {
         console.error("My Texts Error:", error);
-        return NextResponse.json({ success: false, message: "Server Error" }, { status: 500 });
+        return handleCorsError("Server Error", 500, origin);
     }
 }

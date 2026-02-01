@@ -1,13 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import prisma from '../../../lib/prisma';
 import jwt from 'jsonwebtoken';
+import { handleCorsResponse, handleCorsError } from '../../../lib/cors';
 
 export async function GET(request: NextRequest) {
+    const origin = request.headers.get('origin');
+    
     try {
         const token = request.cookies.get('auth_token')?.value;
 
         if (!token) {
-            return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+            return handleCorsError("Unauthorized", 401, origin);
         }
 
         let userId: string;
@@ -17,7 +20,7 @@ export async function GET(request: NextRequest) {
             userId = decoded.userId;
         } catch (e) {
             console.error(e);
-             return NextResponse.json({ success: false, message: "Invalid token" }, { status: 401 });
+            return handleCorsError("Invalid token", 401, origin);
         }
 
         const audios = await prisma.audio.findMany({
@@ -26,7 +29,7 @@ export async function GET(request: NextRequest) {
             take: 50
         });
 
-        return NextResponse.json({
+        return handleCorsResponse({
             success: true,
             audios: audios.map(aud => ({
                 id: aud.id,
@@ -35,10 +38,10 @@ export async function GET(request: NextRequest) {
                 audio_url: aud.audioUrl,
                 created_at: aud.createdAt
             }))
-        });
+        }, 200, origin);
 
     } catch (error) {
         console.error("Get My Audios Error:", error);
-        return NextResponse.json({ success: false, message: "Internal Server Error" }, { status: 500 });
+        return handleCorsError("Internal Server Error", 500, origin);
     }
 }

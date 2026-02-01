@@ -6,6 +6,7 @@ import imageRoutes from './routes/images.js';
 import videoRoutes from './routes/videos.js';
 import audioRoutes from './routes/audios.js';
 import textRoutes from './routes/texts.js';
+import projectRoutes from './routes/projects.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -54,6 +55,7 @@ app.use('/api', imageRoutes);
 app.use('/api', videoRoutes);
 app.use('/api', audioRoutes);
 app.use('/api', textRoutes);
+app.use('/api/projects', projectRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

@@ -28,26 +28,35 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { prompt, model, imageUrl } = body;
+        const { prompt, model, imageData, input_images, projectId } = body;
 
-        if (!imageUrl || !prompt) {
+        // imageData is base64, imageUrl is URL - accept either
+        const imageUrlToSave = imageData || body.imageUrl;
+
+        if (!imageUrlToSave || !prompt) {
+            console.error("Missing data in save-image:", { hasImageData: !!imageData, hasImageUrl: !!body.imageUrl, hasPrompt: !!prompt });
             return NextResponse.json({ success: false, message: "Missing data" }, { status: 400 });
         }
+
+        const metadata: Record<string, unknown> = {};
+        if (projectId) metadata.projectId = projectId;
+        if (input_images) metadata.input_images = input_images;
 
         const image = await prisma.image.create({
             data: {
                 userId,
                 prompt,
-                model,
-                imageUrl,
-                status: "completed"
+                model: model || 'unknown',
+                imageUrl: imageUrlToSave,
+                status: "completed",
+                metadata: Object.keys(metadata).length > 0 ? metadata : undefined
             }
         });
 
         return NextResponse.json({
             success: true,
-            image_id: image.id,
-            image_url: image.imageUrl
+            id: image.id,
+            view_url: image.imageUrl
         });
 
     } catch (error) {

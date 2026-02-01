@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ success: false, message: "Missing data" }, { status: 400 });
         }
 
-        const metadata: Record<string, unknown> = {};
+        const metadata: { projectId?: string; input_images?: string[] } = {};
         if (projectId) metadata.projectId = projectId;
         if (input_images) metadata.input_images = input_images;
 
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
                 model: model || 'unknown',
                 imageUrl: imageUrlToSave,
                 status: "completed",
-                metadata: Object.keys(metadata).length > 0 ? metadata : undefined
+                metadata: Object.keys(metadata).length > 0 ? metadata as never : undefined
             }
         });
 

@@ -76,13 +76,9 @@ router.post('/signup', async (req: Request, res: Response) => {
 // Sign In
 router.post('/signin', async (req: Request, res: Response) => {
   try {
-    console.log('Signin request body:', req.body);
-    // Accept both 'email' and 'identifier' (frontend sends 'identifier')
-    const email = req.body.email || req.body.identifier;
-    const { password } = req.body;
+    const { email, password } = req.body;
 
     if (!email || !password) {
-      console.log('Missing credentials - email:', !!email, 'password:', !!password);
       return res.status(400).json({ success: false, message: "Email and password are required" });
     }
 

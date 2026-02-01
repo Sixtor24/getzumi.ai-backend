@@ -44,6 +44,14 @@ router.post('/signup', async (req: Request, res: Response) => {
 
     const userId = newUser.id;
 
+    // Create default folder for new user
+    await prisma.folder.create({
+      data: {
+        userId: userId,
+        name: 'Nuevo proyecto'
+      }
+    });
+
     const token = jwt.sign(
       { userId: userId, username: username, email: email },
       process.env.JWT_SECRET || 'fallback-secret-key-change-me',

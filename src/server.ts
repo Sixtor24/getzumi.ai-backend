@@ -72,4 +72,5 @@ app.listen(PORT, () => {
   console.log(`🚀 Express server running on port ${PORT}`);
   console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌐 CORS enabled for: ${allowedOrigins.join(', ')}`);
+  console.log(`✨ Project endpoints: /api/projects`);
 });

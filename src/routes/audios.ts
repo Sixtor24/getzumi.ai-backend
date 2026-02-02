@@ -140,11 +140,11 @@ router.post('/preview-voice', async (req: Request, res: Response) => {
       return res.status(500).json({ success: false, message: "Cartesia client not initialized" });
     }
 
-    // Texto de prueba corto
-    const sampleText = "Hello, this is a preview of my voice. How do I sound?";
+    // Texto de prueba MUY corto para preview rápido
+    const sampleText = "Hi, this is my voice!";
 
     const audioResponse = await cartesiaClient.tts.bytes({
-      model_id: 'sonic-english',
+      model_id: 'sonic-turbo', // Modelo más rápido para previews
       transcript: sampleText,
       voice: {
         mode: 'id',
@@ -152,20 +152,20 @@ router.post('/preview-voice', async (req: Request, res: Response) => {
       },
       language: 'en',
       output_format: {
-        container: 'wav',
-        sample_rate: 44100,
-        encoding: 'pcm_f32le',
+        container: 'mp3',
+        encoding: 'mp3',
+        sample_rate: 22050,
       }
     });
 
     const audioBuffer = Buffer.from(audioResponse);
     const audioBase64 = audioBuffer.toString('base64');
-    const audioDataUrl = `data:audio/wav;base64,${audioBase64}`;
+    const audioDataUrl = `data:audio/mp3;base64,${audioBase64}`;
 
     return res.status(200).json({
       success: true,
       audioUrl: audioDataUrl,
-      format: 'wav'
+      format: 'mp3'
     });
 
   } catch (error: any) {

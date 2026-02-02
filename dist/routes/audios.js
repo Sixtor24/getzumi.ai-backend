@@ -1,36 +1,159 @@
 import { Router } from 'express';
 import prisma from '../lib/prisma.js';
 import jwt from 'jsonwebtoken';
+import Cartesia from '@cartesia/cartesia-js';
 const router = Router();
-// TTS (Text-to-Speech)
-router.post('/tts', async (req, res) => {
+const CARTESIA_API_KEY = process.env.CARTESIA_API_KEY;
+// Inicializar Cartesia Client
+let cartesiaClient = null;
+if (CARTESIA_API_KEY) {
+    cartesiaClient = new Cartesia({ apiKey: CARTESIA_API_KEY });
+}
+// Helper para extraer userId del token
+function getUserIdFromToken(req) {
     try {
         const token = req.cookies.auth_token;
-        if (!token) {
+        if (!token)
+            return null;
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key-change-me');
+        return decoded.userId;
+    }
+    catch (e) {
+        return null;
+    }
+}
+// Get Cartesia Voices
+router.get('/voices', async (req, res) => {
+    try {
+        const userId = getUserIdFromToken(req);
+        if (!userId) {
             return res.status(401).json({ success: false, message: "Authentication required" });
         }
-        // Add your TTS logic here
-        return res.status(501).json({ success: false, message: "TTS not implemented yet" });
+        if (!cartesiaClient) {
+            return res.status(500).json({ success: false, message: "Cartesia API key not configured" });
+        }
+        // Obtener voces usando el SDK oficial
+        const voicesPage = await cartesiaClient.voices.list();
+        const voices = [];
+        for await (const voice of voicesPage) {
+            voices.push({
+                id: voice.id,
+                name: voice.name,
+                description: voice.description || '',
+                language: voice.language || 'en',
+                is_public: voice.is_public || false
+            });
+        }
+        return res.status(200).json({
+            success: true,
+            voices: voices
+        });
     }
     catch (error) {
-        console.error("TTS Error:", error);
+        console.error("Get Voices Error:", error.message);
+        return res.status(500).json({ success: false, message: "Failed to fetch voices" });
+    }
+});
+// TTS (Text-to-Speech) - Generate audio with Cartesia
+router.post('/tts', async (req, res) => {
+    try {
+        const userId = getUserIdFromToken(req);
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Authentication required" });
+        }
+        if (!CARTESIA_API_KEY) {
+            return res.status(500).json({ success: false, message: "Cartesia API key not configured" });
+        }
+        const { text, voiceId, modelId, speed, language, outputFormat } = req.body;
+        if (!text || !voiceId) {
+            return res.status(400).json({ success: false, message: "Text and voiceId are required" });
+        }
+        if (!cartesiaClient) {
+            return res.status(500).json({ success: false, message: "Cartesia client not initialized" });
+        }
+        // Generar audio con Cartesia SDK
+        const audioResponse = await cartesiaClient.tts.bytes({
+            model_id: modelId || 'sonic-english',
+            transcript: text,
+            voice: {
+                mode: 'id',
+                id: voiceId,
+            },
+            language: language || 'en',
+            output_format: outputFormat || {
+                container: 'wav',
+                sample_rate: 44100,
+                encoding: 'pcm_f32le',
+            }
+        });
+        // Convertir a base64 para enviar al frontend
+        const audioBuffer = Buffer.from(audioResponse);
+        const audioBase64 = audioBuffer.toString('base64');
+        const audioDataUrl = `data:audio/wav;base64,${audioBase64}`;
+        return res.status(200).json({
+            success: true,
+            audioUrl: audioDataUrl,
+            format: 'wav'
+        });
+    }
+    catch (error) {
+        console.error("TTS Error:", error.response?.data || error.message);
         return res.status(500).json({ success: false, message: "Failed to generate audio" });
+    }
+});
+// Preview Voice - Generate short sample
+router.post('/preview-voice', async (req, res) => {
+    try {
+        const userId = getUserIdFromToken(req);
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Authentication required" });
+        }
+        if (!CARTESIA_API_KEY) {
+            return res.status(500).json({ success: false, message: "Cartesia API key not configured" });
+        }
+        const { voiceId } = req.body;
+        if (!voiceId) {
+            return res.status(400).json({ success: false, message: "VoiceId is required" });
+        }
+        if (!cartesiaClient) {
+            return res.status(500).json({ success: false, message: "Cartesia client not initialized" });
+        }
+        // Texto de prueba corto
+        const sampleText = "Hello, this is a preview of my voice. How do I sound?";
+        const audioResponse = await cartesiaClient.tts.bytes({
+            model_id: 'sonic-english',
+            transcript: sampleText,
+            voice: {
+                mode: 'id',
+                id: voiceId,
+            },
+            language: 'en',
+            output_format: {
+                container: 'wav',
+                sample_rate: 44100,
+                encoding: 'pcm_f32le',
+            }
+        });
+        const audioBuffer = Buffer.from(audioResponse);
+        const audioBase64 = audioBuffer.toString('base64');
+        const audioDataUrl = `data:audio/wav;base64,${audioBase64}`;
+        return res.status(200).json({
+            success: true,
+            audioUrl: audioDataUrl,
+            format: 'wav'
+        });
+    }
+    catch (error) {
+        console.error("Preview Voice Error:", error.response?.data || error.message);
+        return res.status(500).json({ success: false, message: "Failed to preview voice" });
     }
 });
 // Save Audio
 router.post('/save-audio', async (req, res) => {
     try {
-        const token = req.cookies.auth_token;
-        if (!token) {
+        const userId = getUserIdFromToken(req);
+        if (!userId) {
             return res.status(401).json({ success: false, message: "Authentication required" });
-        }
-        let userId;
-        try {
-            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key-change-me');
-            userId = decoded.userId;
-        }
-        catch (e) {
-            return res.status(401).json({ success: false, message: "Invalid token" });
         }
         const { text, voice, audioUrl } = req.body;
         if (!text || !audioUrl) {
@@ -63,12 +186,8 @@ router.get('/my-audios', async (req, res) => {
         if (!token) {
             return res.status(401).json({ success: false, message: "Authentication required" });
         }
-        let userId;
-        try {
-            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key-change-me');
-            userId = decoded.userId;
-        }
-        catch (e) {
+        const userId = getUserIdFromToken(req);
+        if (!userId) {
             return res.status(401).json({ success: false, message: "Invalid token" });
         }
         const audios = await prisma.audio.findMany({

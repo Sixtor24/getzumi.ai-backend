@@ -1,12 +1,17 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma.js';
 import jwt from 'jsonwebtoken';
-import axios from 'axios';
+import Cartesia from '@cartesia/cartesia-js';
 
 const router = Router();
 
-const CARTESIA_API_URL = 'https://api.cartesia.ai';
 const CARTESIA_API_KEY = process.env.CARTESIA_API_KEY;
+
+// Inicializar Cartesia Client
+let cartesiaClient: Cartesia | null = null;
+if (CARTESIA_API_KEY) {
+  cartesiaClient = new Cartesia({ apiKey: CARTESIA_API_KEY });
+}
 
 // Helper para extraer userId del token
 function getUserIdFromToken(req: Request): string | null {
@@ -29,24 +34,31 @@ router.get('/voices', async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, message: "Authentication required" });
     }
 
-    if (!CARTESIA_API_KEY) {
+    if (!cartesiaClient) {
       return res.status(500).json({ success: false, message: "Cartesia API key not configured" });
     }
 
-    const response = await axios.get(`${CARTESIA_API_URL}/voices`, {
-      headers: {
-        'X-API-Key': CARTESIA_API_KEY,
-        'Cartesia-Version': '2025-04-16',
-      },
-    });
+    // Obtener voces usando el SDK oficial
+    const voicesPage = await cartesiaClient.voices.list();
+    const voices = [];
+    
+    for await (const voice of voicesPage) {
+      voices.push({
+        id: voice.id,
+        name: voice.name,
+        description: voice.description || '',
+        language: voice.language || 'en',
+        is_public: voice.is_public || false
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      voices: response.data
+      voices: voices
     });
 
   } catch (error: any) {
-    console.error("Get Voices Error:", error.response?.data || error.message);
+    console.error("Get Voices Error:", error.message);
     return res.status(500).json({ success: false, message: "Failed to fetch voices" });
   }
 });
@@ -69,39 +81,28 @@ router.post('/tts', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "Text and voiceId are required" });
     }
 
-    // Generar audio con Cartesia
-    const response = await axios.post(
-      `${CARTESIA_API_URL}/tts/bytes`,
-      {
-        model_id: modelId || 'sonic-3',
-        transcript: text,
-        voice: {
-          mode: 'id',
-          id: voiceId,
-        },
-        output_format: outputFormat || {
-          container: 'wav',
-          encoding: 'pcm_f32le',
-          sample_rate: 44100,
-        },
-        speed: speed || 'normal',
-        generation_config: {
-          speed: speed || 1,
-          volume: 1
-        }
+    if (!cartesiaClient) {
+      return res.status(500).json({ success: false, message: "Cartesia client not initialized" });
+    }
+
+    // Generar audio con Cartesia SDK
+    const audioResponse = await cartesiaClient.tts.bytes({
+      model_id: modelId || 'sonic-english',
+      transcript: text,
+      voice: {
+        mode: 'id',
+        id: voiceId,
       },
-      {
-        headers: {
-          'X-API-Key': CARTESIA_API_KEY,
-          'Cartesia-Version': '2025-04-16',
-          'Content-Type': 'application/json',
-        },
-        responseType: 'arraybuffer',
+      language: language || 'en',
+      output_format: outputFormat || {
+        container: 'wav',
+        sample_rate: 44100,
+        encoding: 'pcm_f32le',
       }
-    );
+    });
 
     // Convertir a base64 para enviar al frontend
-    const audioBuffer = Buffer.from(response.data);
+    const audioBuffer = Buffer.from(audioResponse);
     const audioBase64 = audioBuffer.toString('base64');
     const audioDataUrl = `data:audio/wav;base64,${audioBase64}`;
 
@@ -135,40 +136,29 @@ router.post('/preview-voice', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "VoiceId is required" });
     }
 
+    if (!cartesiaClient) {
+      return res.status(500).json({ success: false, message: "Cartesia client not initialized" });
+    }
+
     // Texto de prueba corto
     const sampleText = "Hello, this is a preview of my voice. How do I sound?";
 
-    const response = await axios.post(
-      `${CARTESIA_API_URL}/tts/bytes`,
-      {
-        model_id: 'sonic-3',
-        transcript: sampleText,
-        voice: {
-          mode: 'id',
-          id: voiceId,
-        },
-        output_format: {
-          container: 'wav',
-          encoding: 'pcm_f32le',
-          sample_rate: 44100,
-        },
-        speed: 'normal',
-        generation_config: {
-          speed: 1,
-          volume: 1
-        }
+    const audioResponse = await cartesiaClient.tts.bytes({
+      model_id: 'sonic-english',
+      transcript: sampleText,
+      voice: {
+        mode: 'id',
+        id: voiceId,
       },
-      {
-        headers: {
-          'X-API-Key': CARTESIA_API_KEY,
-          'Cartesia-Version': '2025-04-16',
-          'Content-Type': 'application/json',
-        },
-        responseType: 'arraybuffer',
+      language: 'en',
+      output_format: {
+        container: 'wav',
+        sample_rate: 44100,
+        encoding: 'pcm_f32le',
       }
-    );
+    });
 
-    const audioBuffer = Buffer.from(response.data);
+    const audioBuffer = Buffer.from(audioResponse);
     const audioBase64 = audioBuffer.toString('base64');
     const audioDataUrl = `data:audio/wav;base64,${audioBase64}`;
 

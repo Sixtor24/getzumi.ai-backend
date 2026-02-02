@@ -36,7 +36,7 @@ router.get('/voices', async (req: Request, res: Response) => {
     const response = await axios.get(`${CARTESIA_API_URL}/voices`, {
       headers: {
         'X-API-Key': CARTESIA_API_KEY,
-        'Cartesia-Version': '2024-06-10',
+        'Cartesia-Version': '2025-04-16',
       },
     });
 
@@ -73,24 +73,27 @@ router.post('/tts', async (req: Request, res: Response) => {
     const response = await axios.post(
       `${CARTESIA_API_URL}/tts/bytes`,
       {
-        model_id: modelId || 'sonic-english',
+        model_id: modelId || 'sonic-3',
         transcript: text,
         voice: {
           mode: 'id',
           id: voiceId,
         },
         output_format: outputFormat || {
-          container: 'mp3',
-          encoding: 'mp3',
+          container: 'wav',
+          encoding: 'pcm_f32le',
           sample_rate: 44100,
         },
-        language: language || 'en',
-        ...(speed && { speed }),
+        speed: speed || 'normal',
+        generation_config: {
+          speed: speed || 1,
+          volume: 1
+        }
       },
       {
         headers: {
           'X-API-Key': CARTESIA_API_KEY,
-          'Cartesia-Version': '2024-06-10',
+          'Cartesia-Version': '2025-04-16',
           'Content-Type': 'application/json',
         },
         responseType: 'arraybuffer',
@@ -100,12 +103,12 @@ router.post('/tts', async (req: Request, res: Response) => {
     // Convertir a base64 para enviar al frontend
     const audioBuffer = Buffer.from(response.data);
     const audioBase64 = audioBuffer.toString('base64');
-    const audioDataUrl = `data:audio/mp3;base64,${audioBase64}`;
+    const audioDataUrl = `data:audio/wav;base64,${audioBase64}`;
 
     return res.status(200).json({
       success: true,
       audioUrl: audioDataUrl,
-      format: 'mp3'
+      format: 'wav'
     });
 
   } catch (error: any) {
@@ -138,23 +141,27 @@ router.post('/preview-voice', async (req: Request, res: Response) => {
     const response = await axios.post(
       `${CARTESIA_API_URL}/tts/bytes`,
       {
-        model_id: 'sonic-english',
+        model_id: 'sonic-3',
         transcript: sampleText,
         voice: {
           mode: 'id',
           id: voiceId,
         },
         output_format: {
-          container: 'mp3',
-          encoding: 'mp3',
+          container: 'wav',
+          encoding: 'pcm_f32le',
           sample_rate: 44100,
         },
-        language: 'en',
+        speed: 'normal',
+        generation_config: {
+          speed: 1,
+          volume: 1
+        }
       },
       {
         headers: {
           'X-API-Key': CARTESIA_API_KEY,
-          'Cartesia-Version': '2024-06-10',
+          'Cartesia-Version': '2025-04-16',
           'Content-Type': 'application/json',
         },
         responseType: 'arraybuffer',
@@ -163,12 +170,12 @@ router.post('/preview-voice', async (req: Request, res: Response) => {
 
     const audioBuffer = Buffer.from(response.data);
     const audioBase64 = audioBuffer.toString('base64');
-    const audioDataUrl = `data:audio/mp3;base64,${audioBase64}`;
+    const audioDataUrl = `data:audio/wav;base64,${audioBase64}`;
 
     return res.status(200).json({
       success: true,
       audioUrl: audioDataUrl,
-      format: 'mp3'
+      format: 'wav'
     });
 
   } catch (error: any) {

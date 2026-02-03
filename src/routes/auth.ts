@@ -72,7 +72,14 @@ router.post('/signup', async (req: Request, res: Response) => {
       success: true, 
       message: "User registered successfully",
       token: token,
-      user: { id: userId, username, email, fullName }
+      user: { 
+        id: userId, 
+        username, 
+        email, 
+        fullName,
+        isSubscribed: newUser.isSubscribed,
+        subscriptionPlan: newUser.subscriptionPlan
+      }
     });
 
   } catch (error) {
@@ -124,7 +131,14 @@ router.post('/signin', async (req: Request, res: Response) => {
       success: true, 
       message: "Login successful",
       token: token,
-      user: { id: user.id, username: user.username, email: user.email, fullName: user.fullName }
+      user: { 
+        id: user.id, 
+        username: user.username, 
+        email: user.email, 
+        fullName: user.fullName,
+        isSubscribed: user.isSubscribed,
+        subscriptionPlan: user.subscriptionPlan
+      }
     });
 
   } catch (error) {

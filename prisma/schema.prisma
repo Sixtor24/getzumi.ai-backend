@@ -8,13 +8,17 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  username  String   @unique
-  fullName  String
-  password  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                   String    @id @default(uuid())
+  email                String    @unique
+  username             String    @unique
+  fullName             String
+  password             String
+  isSubscribed         Boolean   @default(false)
+  subscriptionPlan     String?
+  subscriptionStartDate DateTime?
+  subscriptionEndDate  DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
   
   videos    Video[]
   images    Image[]

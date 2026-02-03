@@ -7,6 +7,7 @@ import videoRoutes from './routes/videos.js';
 import audioRoutes from './routes/audios.js';
 import textRoutes from './routes/texts.js';
 import projectRoutes from './routes/projects.js';
+import subscriptionRoutes from './routes/subscriptions.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 // CORS configuration
@@ -45,6 +46,7 @@ app.get('/health', (req, res) => {
 });
 // API Routes - Order matters! More specific routes first
 app.use('/api/auth', authRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/images', imageRoutes);
 app.use('/api/videos', videoRoutes);

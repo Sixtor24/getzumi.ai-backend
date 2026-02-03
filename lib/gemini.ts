@@ -80,7 +80,7 @@ export class GeminiImageService {
         // FIX: Seedream seems to ignore 'n' parameter or fail with it on this provider. 
         // We force parallel execution for Seedream as well.
         if (model.includes('seedream')) {
-             const payload = {
+             const payload: any = {
                 model: model,
                 prompt: prompt,
                 n: 1, // Force single per request
@@ -88,6 +88,14 @@ export class GeminiImageService {
                 response_format: "b64_json",
                 watermark: false
             };
+            
+            // CRITICAL FIX: SeeDream is an image-to-image editing model
+            // It REQUIRES image_urls parameter to use reference images
+            if (inputImages && inputImages.length > 0) {
+                payload.image_urls = inputImages.map(img => 
+                    img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`
+                );
+            }
 
             const promises = Array(count).fill(0).map(() => 
                 fetch(currentApiUrl, {

@@ -9,6 +9,7 @@ interface GenerateRequestBody {
     prompt: string;
     model?: string;
     input_images?: string[];
+    count?: number;
 }
 
 export async function POST(request: NextRequest) {
@@ -16,7 +17,14 @@ export async function POST(request: NextRequest) {
   
   try {
     const body: GenerateRequestBody = await request.json();
-    const { prompt, model = "gemini-3-pro-image-preview", input_images = [] } = body;
+    const { prompt, model = "gemini-3-pro-image-preview", input_images = [], count = 4 } = body;
+
+    console.log('[API /generate] Received body:', { 
+      prompt: prompt.substring(0, 50) + '...', 
+      model, 
+      count, 
+      hasInputImages: input_images.length > 0 
+    });
 
     const apiKey = process.env.APIYI_API_KEY;
     if (!apiKey) {
@@ -27,7 +35,8 @@ export async function POST(request: NextRequest) {
     }
 
     const service = new GeminiImageService(apiKey);
-    const result = await service.generateImages(prompt, model, input_images, 4);
+    console.log('[API /generate] Calling generateImages with count:', count);
+    const result = await service.generateImages(prompt, model, input_images, count);
 
     if (!result.success || !result.data || result.data.length === 0) {
       return NextResponse.json({ success: false, message: result.error }, { 
@@ -44,10 +53,12 @@ export async function POST(request: NextRequest) {
 
     const candidates = compressedImages.map(buf => `data:image/jpeg;base64,${buf.toString('base64')}`);
 
+    console.log(`[API Generate] Generated ${candidates.length} images with count=${count}`);
+
     return NextResponse.json({
       success: true,
       candidates: candidates,
-      message: "Generated 4 candidates. Please select one to save."
+      message: `Generated ${candidates.length} candidate${candidates.length > 1 ? 's' : ''}. Please select one to save.`
     }, {
       headers: corsHeaders(origin)
     });

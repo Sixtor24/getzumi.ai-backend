@@ -26,6 +26,7 @@ model User {
   texts     Text[]
   folders   Folder[]
   projects  Project[]
+  actors    Actor[]
 }
 
 model Folder {
@@ -113,6 +114,25 @@ model Text {
   prompt      String
   model       String
   content     String   @db.Text
+  status      String   @default("completed")
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId])
+}
+
+model Actor {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  instruction String?
+  imageUrl    String?
+  videoUrl    String
+  voiceId     String?
+  gender      String   @default("F")
+  age         String   @default("Adult")
   status      String   @default("completed")
   metadata    Json?
   createdAt   DateTime @default(now())

@@ -9,7 +9,14 @@ const router = Router();
 // Generate Image
 router.post('/generate', async (req: Request, res: Response) => {
   try {
-    const { prompt, model = "gemini-3-pro-image-preview", input_images = [] } = req.body;
+    const { prompt, model = "gemini-3-pro-image-preview", input_images = [], count = 4 } = req.body;
+
+    console.log('[API /images/generate] Received body:', { 
+      prompt: prompt.substring(0, 50) + '...', 
+      model, 
+      count, 
+      hasInputImages: input_images.length > 0 
+    });
 
     const apiKey = process.env.APIYI_API_KEY;
     if (!apiKey) {
@@ -17,7 +24,8 @@ router.post('/generate', async (req: Request, res: Response) => {
     }
 
     const service = new GeminiImageService(apiKey);
-    const result = await service.generateImages(prompt, model, input_images, 4);
+    console.log('[API /images/generate] Calling generateImages with count:', count);
+    const result = await service.generateImages(prompt, model, input_images, count);
 
     if (!result.success || !result.data || result.data.length === 0) {
       return res.status(502).json({ success: false, message: result.error });
@@ -31,10 +39,12 @@ router.post('/generate', async (req: Request, res: Response) => {
 
     const candidates = compressedImages.map(buf => `data:image/jpeg;base64,${buf.toString('base64')}`);
 
+    console.log(`[API /images/generate] Generated ${candidates.length} images with count=${count}`);
+
     return res.status(200).json({
       success: true,
       candidates: candidates,
-      message: "Generated 4 candidates. Please select one to save."
+      message: `Generated ${candidates.length} candidate${candidates.length > 1 ? 's' : ''}. Please select one to save.`
     });
 
   } catch (error) {

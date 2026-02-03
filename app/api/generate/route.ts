@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '../../../lib/mongodb';
 import { GeminiImageService } from '../../../lib/gemini';
 import sharp from 'sharp';
-import { Binary } from 'mongodb';
+
 import { corsHeaders } from '../../../lib/cors';
 
 interface GenerateRequestBody {

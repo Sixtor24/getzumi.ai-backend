@@ -97,17 +97,23 @@ export class GeminiImageService {
                 );
             }
 
-            const promises = Array(count).fill(0).map(() => 
+            const promises = Array(count).fill(0).map((_, index) => 
                 fetch(currentApiUrl, {
                     method: "POST", 
                     headers: this.headers, 
                     body: JSON.stringify(payload)
                 }).then(async res => {
                     if (!res.ok) {
-                        console.error("Seedream Parallel Error:", await res.text());
+                        console.error(`Seedream Request ${index + 1}/${count} Error:`, await res.text());
                         return null;
                     }
                     const json = await res.json();
+                    console.log(`[GeminiService] Request ${index + 1}/${count} response:`, {
+                        hasData: !!json.data,
+                        dataLength: json.data?.length,
+                        firstItem: json.data?.[0] ? Object.keys(json.data[0]) : []
+                    });
+                    
                     if (json.data && json.data[0]) {
                         if (json.data[0].b64_json) return Buffer.from(json.data[0].b64_json, 'base64');
                         if (json.data[0].url) {
@@ -122,7 +128,9 @@ export class GeminiImageService {
             try {
                 console.log(`[GeminiService] Launching ${count} parallel requests to ${model} (Image API)...`);
                 const results = await Promise.all(promises);
+                console.log(`[GeminiService] Received ${results.length} results from Promise.all`);
                 results.forEach(buf => { if (buf) buffers.push(buf); });
+                console.log(`[GeminiService] Total buffers collected: ${buffers.length}`);
             } catch (e) {
                  console.error("Parallel Seedream Gen Error", e);
                  return { success: false, error: String(e) };
@@ -206,7 +214,13 @@ export class GeminiImageService {
     }
 
     if (buffers.length === 0) return { success: false, error: "No images generated successfully" };
-    return { success: true, data: buffers };
+    
+    // CRITICAL FIX: Limit results to requested count
+    // Some APIs (like SeeDream) may return more images than requested
+    const limitedBuffers = buffers.slice(0, count);
+    console.log(`[GeminiService] Requested: ${count}, Generated: ${buffers.length}, Returning: ${limitedBuffers.length}`);
+    
+    return { success: true, data: limitedBuffers };
   }
 
   // Deprecated shim

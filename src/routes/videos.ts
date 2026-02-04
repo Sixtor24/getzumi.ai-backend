@@ -5,8 +5,8 @@ import { VideoGenerationService } from '../lib/videoService.js';
 
 const router = Router();
 
-// Background processing function for SORA Streaming
-async function processSoraVideoInBackground(
+// Background processing function for all video models
+async function processVideoInBackground(
   videoId: string,
   prompt: string,
   model: string,
@@ -105,11 +105,10 @@ router.post('/generate', async (req: Request, res: Response) => {
         }
       });
 
-      // Process in background (don't await)
-      processSoraVideoInBackground(pendingVideo.id, prompt, model, input_image, apiKey).catch((err: Error) => {
-        console.error('[Video Generate] Background processing error:', err);
-      });
-
+      // Start background processing (don't await)
+      processVideoInBackground(pendingVideo.id, prompt, model, input_image, apiKey);
+      
+      // Return immediately with pending status
       return res.status(200).json({
         success: true,
         video: {
@@ -120,49 +119,10 @@ router.post('/generate', async (req: Request, res: Response) => {
       });
     }
 
-    // Non-SORA models: Process synchronously (VEO, SORA Async)
-    console.log('[Video Generate] Starting:', { model: model || "veo-3.1", hasInputImage: !!input_image });
-
-    let result;
-    try {
-      const videoService = new VideoGenerationService(apiKey);
-      result = await videoService.generateVideo(prompt, model || "veo-3.1", input_image);
-      console.log('[Video Generate] Service result:', { success: result.success, hasVideoUrl: !!result.videoUrl });
-    } catch (serviceError) {
-      console.error('[Video Generate] Service error:', serviceError);
-      return res.status(500).json({ 
-        success: false, 
-        message: serviceError instanceof Error ? serviceError.message : "Video service error" 
-      });
-    }
-
-    if (!result.success) {
-      console.error('[Video Generate] Failed:', result.error);
-      return res.status(502).json({ success: false, message: result.error || "Video generation failed" });
-    }
-
-    // Save to database
-    const savedVideo = await prisma.video.create({
-      data: {
-        userId: userId,
-        prompt: prompt,
-        model: model || "veo-3.1",
-        videoUrl: result.videoUrl!,
-        status: "completed",
-        projectId: projectId || null,
-        createdAt: new Date()
-      }
-    });
-
-    console.log('[Video Generate] Success:', { videoId: savedVideo.id, url: result.videoUrl });
-
-    return res.status(200).json({
-      success: true,
-      video: {
-        id: savedVideo.id,
-        videoUrl: result.videoUrl,
-        taskId: result.taskId
-      }
+    // Fallback: Should never reach here since all models use async
+    return res.status(500).json({ 
+      success: false, 
+      message: "Invalid configuration" 
     });
 
   } catch (error) {

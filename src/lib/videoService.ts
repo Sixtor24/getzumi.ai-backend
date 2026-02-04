@@ -19,17 +19,22 @@ export class VideoGenerationService {
     model: string,
     inputImage?: string
   ): Promise<VideoGenerationResult> {
+    console.log('[VideoService] generateVideo called:', { prompt: prompt.substring(0, 50), model, hasImage: !!inputImage });
+    
     try {
       // Determine which API to use based on model
       if (model.includes('veo')) {
+        console.log('[VideoService] Using VEO API');
         return await this.generateVeoVideo(prompt, model, inputImage);
       } else if (model.includes('sora')) {
+        console.log('[VideoService] Using SORA API');
         return await this.generateSoraVideo(prompt, model, inputImage);
       } else {
-        return { success: false, error: 'Unsupported model' };
+        console.error('[VideoService] Unsupported model:', model);
+        return { success: false, error: `Unsupported model: ${model}` };
       }
     } catch (error) {
-      console.error('[VideoService] Error:', error);
+      console.error('[VideoService] Unexpected error:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -44,60 +49,76 @@ export class VideoGenerationService {
   ): Promise<VideoGenerationResult> {
     console.log('[VideoService] Generating VEO video:', { model, hasImage: !!inputImage });
 
-    // Map model names to VEO API format
-    const veoModelMap: Record<string, string> = {
-      'veo-3.1': 'veo3',
-      'veo-3.1-fast': 'veo3-fast',
-      'veo-3.1-pro': 'veo3-pro',
-      'veo3': 'veo3',
-      'veo3-fast': 'veo3-fast',
-      'veo3-pro': 'veo3-pro',
-    };
+    try {
+      // Map model names to VEO API format
+      const veoModelMap: Record<string, string> = {
+        'veo-3.1': 'veo3',
+        'veo-3.1-fast': 'veo3-fast',
+        'veo-3.1-pro': 'veo3-pro',
+        'veo3': 'veo3',
+        'veo3-fast': 'veo3-fast',
+        'veo3-pro': 'veo3-pro',
+      };
 
-    const veoModel = veoModelMap[model] || 'veo3';
+      const veoModel = veoModelMap[model] || 'veo3';
+      console.log('[VideoService] Mapped model:', veoModel);
 
-    // Submit task
-    const submitPayload: any = {
-      prompt,
-      model: veoModel,
-      enhance_prompt: false,
-    };
+      // Submit task
+      const submitPayload: any = {
+        prompt,
+        model: veoModel,
+        enhance_prompt: false,
+      };
 
-    if (inputImage) {
-      submitPayload.images = [inputImage];
-    }
+      if (inputImage) {
+        submitPayload.images = [inputImage];
+      }
 
-    const submitResponse = await fetch(`${this.baseUrl}/veo/v1/api/video/submit`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(submitPayload),
-    });
+      console.log('[VideoService] Submitting to VEO API...');
+      const submitResponse = await fetch(`${this.baseUrl}/veo/v1/api/video/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(submitPayload),
+      });
 
-    if (!submitResponse.ok) {
-      const errorText = await submitResponse.text();
-      console.error('[VideoService] VEO submit error:', errorText);
-      return { success: false, error: 'Failed to submit VEO task' };
-    }
+      console.log('[VideoService] VEO submit response status:', submitResponse.status);
 
-    const submitResult: any = await submitResponse.json();
-    console.log('[VideoService] VEO task submitted:', submitResult);
+      if (!submitResponse.ok) {
+        const errorText = await submitResponse.text();
+        console.error('[VideoService] VEO submit error:', errorText);
+        return { success: false, error: `VEO API error: ${submitResponse.status}` };
+      }
 
-    if (!submitResult.success || !submitResult.data?.taskId) {
-      return { success: false, error: 'Invalid VEO response' };
-    }
+      const submitResult: any = await submitResponse.json();
+      console.log('[VideoService] VEO task submitted:', submitResult);
 
-    const { taskId, pollingUrl } = submitResult.data;
+      if (!submitResult.success || !submitResult.data?.taskId) {
+        console.error('[VideoService] Invalid VEO response structure:', submitResult);
+        return { success: false, error: 'Invalid VEO response' };
+      }
 
-    // Poll for result
-    const videoUrl = await this.pollVeoTask(pollingUrl, taskId);
+      const { taskId, pollingUrl } = submitResult.data;
+      console.log('[VideoService] Starting polling:', { taskId, pollingUrl });
 
-    if (videoUrl) {
-      return { success: true, videoUrl, taskId };
-    } else {
-      return { success: false, error: 'Failed to get video from VEO', taskId };
+      // Poll for result
+      const videoUrl = await this.pollVeoTask(pollingUrl, taskId);
+
+      if (videoUrl) {
+        console.log('[VideoService] VEO video generated successfully:', videoUrl);
+        return { success: true, videoUrl, taskId };
+      } else {
+        console.error('[VideoService] Polling failed to get video URL');
+        return { success: false, error: 'Failed to get video from VEO', taskId };
+      }
+    } catch (error) {
+      console.error('[VideoService] VEO generation error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'VEO generation failed',
+      };
     }
   }
 

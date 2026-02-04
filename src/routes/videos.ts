@@ -36,8 +36,18 @@ router.post('/generate', async (req: Request, res: Response) => {
     console.log('[Video Generate] Starting:', { model: model || "veo-3.1", hasInputImage: !!input_image });
 
     // Use VideoGenerationService
-    const videoService = new VideoGenerationService(apiKey);
-    const result = await videoService.generateVideo(prompt, model || "veo-3.1", input_image);
+    let result;
+    try {
+      const videoService = new VideoGenerationService(apiKey);
+      result = await videoService.generateVideo(prompt, model || "veo-3.1", input_image);
+      console.log('[Video Generate] Service result:', { success: result.success, hasVideoUrl: !!result.videoUrl });
+    } catch (serviceError) {
+      console.error('[Video Generate] Service error:', serviceError);
+      return res.status(500).json({ 
+        success: false, 
+        message: serviceError instanceof Error ? serviceError.message : "Video service error" 
+      });
+    }
 
     if (!result.success) {
       console.error('[Video Generate] Failed:', result.error);

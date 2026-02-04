@@ -201,7 +201,7 @@ export class VideoGenerationService {
       const submitResponse = await fetch(`${this.baseUrl}/v1/videos`, {
         method: 'POST',
         headers: {
-          'Authorization': this.apiKey,
+          'Authorization': `Bearer ${this.apiKey}`,
           ...formData.getHeaders(),
         },
         body: formData as any,

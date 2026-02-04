@@ -186,17 +186,24 @@ export class VideoGenerationService {
     console.log('[VideoService] Generating SORA video:', { model, hasImage: !!inputImage });
 
     try {
-      // SORA API oficial usa JSON con Bearer
+      // SORA-2 API oficial usa JSON con Bearer
+      // Model debe ser exactamente 'sora-2' según la documentación
       const submitPayload: any = {
         model: 'sora-2',
         prompt: prompt,
-        seconds: '8',
-        size: '1280x720'
+        seconds: 8,  // Number, not string
+        size: '1280x720'  // Landscape by default
       };
 
-      console.log('[VideoService] Submitting to SORA API...');
+      // Add input image if provided (for image-to-video)
+      if (inputImage) {
+        submitPayload.input_image = inputImage;
+      }
+
+      console.log('[VideoService] Submitting to SORA-2 API...');
       console.log('[VideoService] Request URL:', `${this.baseUrl}/v1/videos`);
-      console.log('[VideoService] Payload:', JSON.stringify(submitPayload));
+      console.log('[VideoService] Full payload:', JSON.stringify(submitPayload, null, 2));
+      console.log('[VideoService] API Key (first 20 chars):', this.apiKey.substring(0, 20) + '...');
 
       const submitResponse = await fetch(`${this.baseUrl}/v1/videos`, {
         method: 'POST',
@@ -208,36 +215,37 @@ export class VideoGenerationService {
       });
 
       console.log('[VideoService] SORA submit response status:', submitResponse.status);
+      console.log('[VideoService] SORA response headers:', Object.fromEntries(submitResponse.headers.entries()));
 
       if (!submitResponse.ok) {
         const errorText = await submitResponse.text();
         console.error('[VideoService] SORA submit error:', errorText);
-        return { success: false, error: `SORA API error: ${submitResponse.status}` };
+        return { success: false, error: `SORA API error ${submitResponse.status}: ${errorText}` };
       }
 
       const submitResult: any = await submitResponse.json();
-      console.log('[VideoService] SORA task submitted:', submitResult);
+      console.log('[VideoService] SORA task submitted successfully:', JSON.stringify(submitResult, null, 2));
 
       const videoId = submitResult.id;
       if (!videoId) {
-        console.error('[VideoService] No video ID in SORA response:', submitResult);
+        console.error('[VideoService] No video ID in SORA response. Full response:', submitResult);
         return { success: false, error: 'Invalid SORA response - no video ID' };
       }
 
-      console.log('[VideoService] Starting SORA polling:', videoId);
+      console.log('[VideoService] Starting SORA polling for video ID:', videoId);
 
       // Poll for result
       const videoUrl = await this.pollSoraTask(videoId);
 
       if (videoUrl) {
-        console.log('[VideoService] SORA video generated successfully:', videoUrl);
+        console.log('[VideoService] ✅ SORA video generated successfully:', videoUrl);
         return { success: true, videoUrl, taskId: videoId };
       } else {
-        console.error('[VideoService] SORA polling failed to get video URL');
-        return { success: false, error: 'Failed to get video from SORA', taskId: videoId };
+        console.error('[VideoService] ❌ SORA polling failed to get video URL after all attempts');
+        return { success: false, error: 'Failed to get video from SORA - polling timeout or error', taskId: videoId };
       }
     } catch (error) {
-      console.error('[VideoService] SORA generation error:', error);
+      console.error('[VideoService] SORA generation exception:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'SORA generation failed',
@@ -261,25 +269,39 @@ export class VideoGenerationService {
 
         if (!response.ok) {
           console.log(`[VideoService] SORA poll ${attempt + 1}: Response not OK (${response.status})`);
+          const errorText = await response.text();
+          console.error(`[VideoService] SORA poll error response:`, errorText);
           continue;
         }
 
         const result: any = await response.json();
-        console.log(`[VideoService] SORA poll ${attempt + 1}:`, { status: result.status, progress: result.progress });
+        console.log(`[VideoService] SORA poll ${attempt + 1} - Full response:`, JSON.stringify(result, null, 2));
 
-        if (result.status === 'completed' && result.video_url) {
-          console.log('[VideoService] SORA video URL:', result.video_url);
-          return result.video_url;
+        // Check for completed status with multiple possible URL field names
+        if (result.status === 'completed') {
+          const videoUrl = result.video_url || result.videoUrl || result.url || result.output?.video_url;
+          
+          if (videoUrl) {
+            console.log('[VideoService] SORA video URL found:', videoUrl);
+            return videoUrl;
+          } else {
+            console.error('[VideoService] SORA completed but no video URL found in response:', result);
+          }
         }
 
-        if (result.status === 'failed') {
+        if (result.status === 'failed' || result.status === 'error') {
           console.error('[VideoService] SORA task failed:', result);
           return null;
         }
 
-        // Status: queued, in_progress
+        // Log progress for in_progress status
+        if (result.status === 'in_progress' && result.progress) {
+          console.log(`[VideoService] SORA progress: ${result.progress}%`);
+        }
+
+        // Status: queued, in_progress - continue polling
       } catch (error) {
-        console.error('[VideoService] SORA polling error:', error);
+        console.error(`[VideoService] SORA polling error on attempt ${attempt + 1}:`, error);
       }
     }
 

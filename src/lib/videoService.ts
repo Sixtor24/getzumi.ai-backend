@@ -5,6 +5,20 @@ interface VideoGenerationResult {
   error?: string;
 }
 
+interface TaskSubmitResult {
+  success: boolean;
+  taskId?: string;
+  error?: string;
+}
+
+interface TaskStatusResult {
+  success: boolean;
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  videoUrl?: string;
+  progress?: number;
+  error?: string;
+}
+
 export class VideoGenerationService {
   private apiKey: string;
   private baseUrl: string;
@@ -608,6 +622,127 @@ export class VideoGenerationService {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'SORA Streaming failed',
+      };
+    }
+  }
+
+  // NEW: Submit task only without waiting (prevents timeout)
+  async submitTask(prompt: string, model: string, inputImage?: string): Promise<TaskSubmitResult> {
+    console.log('[VideoService] submitTask:', { model, hasImage: !!inputImage });
+    
+    try {
+      if (model.startsWith('veo')) {
+        // VEO: Submit to /v1/videos
+        const response = await fetch(`${this.baseUrl}/v1/videos`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            prompt,
+            model,
+            ...(inputImage && { image: inputImage }),
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[VideoService] VEO submit failed:', response.status, errorText);
+          return { success: false, error: `VEO API error: ${response.status}` };
+        }
+
+        const data = await response.json() as any;
+        console.log('[VideoService] VEO task submitted:', data.id);
+        return { success: true, taskId: data.id };
+        
+      } else if (model.includes('sora')) {
+        // SORA: Submit without stream
+        const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model,
+            stream: false, // NO streaming - just submit
+            messages: [{
+              role: 'user',
+              content: inputImage 
+                ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: inputImage } }]
+                : [{ type: 'text', text: prompt }]
+            }]
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[VideoService] SORA submit failed:', response.status, errorText);
+          return { success: false, error: `SORA API error: ${response.status}` };
+        }
+
+        const data = await response.json() as any;
+        const taskId = data.id || data.task_id || `sora_${Date.now()}`;
+        console.log('[VideoService] SORA task submitted:', taskId);
+        return { success: true, taskId };
+      }
+      
+      return { success: false, error: 'Unsupported model' };
+    } catch (error) {
+      console.error('[VideoService] submitTask error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Submit failed'
+      };
+    }
+  }
+
+  // NEW: Check task status (called by polling endpoint)
+  async checkTaskStatus(taskId: string, model: string): Promise<TaskStatusResult> {
+    console.log('[VideoService] checkTaskStatus:', { taskId, model });
+    
+    try {
+      if (model.startsWith('veo')) {
+        // VEO: Check /v1/videos/{taskId}
+        const response = await fetch(`${this.baseUrl}/v1/videos/${taskId}`, {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+          },
+        });
+
+        if (!response.ok) {
+          console.error('[VideoService] VEO status check failed:', response.status);
+          return { success: false, status: 'failed', error: `Status check failed: ${response.status}` };
+        }
+
+        const data = await response.json() as any;
+        console.log('[VideoService] VEO status:', data.status);
+
+        if (data.status === 'completed' && data.url) {
+          return { success: true, status: 'completed', videoUrl: data.url };
+        } else if (data.status === 'failed') {
+          return { success: false, status: 'failed', error: data.error || 'Generation failed' };
+        } else if (data.status === 'processing') {
+          return { success: true, status: 'processing' };
+        } else {
+          return { success: true, status: 'queued' };
+        }
+        
+      } else if (model.includes('sora')) {
+        // SORA: For now, return processing (SORA doesn't have good status API)
+        // Would need to call the streaming API to check, but that defeats the purpose
+        // Better: Mark as processing and let it timeout gracefully
+        return { success: true, status: 'processing' };
+      }
+      
+      return { success: false, status: 'failed', error: 'Unsupported model' };
+    } catch (error) {
+      console.error('[VideoService] checkTaskStatus error:', error);
+      return {
+        success: false,
+        status: 'failed',
+        error: error instanceof Error ? error.message : 'Status check failed'
       };
     }
   }

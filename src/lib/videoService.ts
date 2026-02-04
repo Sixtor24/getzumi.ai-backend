@@ -468,26 +468,34 @@ export class VideoGenerationService {
     console.log('[VideoService] Generating SORA Streaming video:', { model, hasImage: !!inputImage });
 
     try {
-      // SORA Video2 Streaming API - instant response, no polling needed
-      // Endpoint: /v1/chat/completions (streaming mode)
-      const payload: any = {
-        model: model,
-        stream: false,
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ]
-      };
-
-      // Add input image if provided
+      // SORA Video2 Streaming API - chat completions endpoint
+      // Endpoint: /v1/chat/completions
+      // Format content properly for text vs image-to-video
+      let messageContent: any;
+      
       if (inputImage) {
-        payload.messages[0].content = [
+        // Image-to-video: array format with text + image_url
+        messageContent = [
           { type: 'text', text: prompt },
           { type: 'image_url', image_url: { url: inputImage } }
         ];
+      } else {
+        // Text-to-video: array format with just text
+        messageContent = [
+          { type: 'text', text: prompt }
+        ];
       }
+
+      const payload: any = {
+        model: model,
+        stream: false, // Non-streaming for simplicity
+        messages: [
+          {
+            role: 'user',
+            content: messageContent
+          }
+        ]
+      };
 
       console.log('[VideoService] Submitting to SORA Streaming API...');
       console.log('[VideoService] Request URL:', `${this.baseUrl}/v1/chat/completions`);
@@ -539,31 +547,51 @@ export class VideoGenerationService {
       const content = result.choices?.[0]?.message?.content;
       if (!content) {
         console.error('[VideoService] No content in SORA Streaming response');
+        console.error('[VideoService] Full result:', JSON.stringify(result, null, 2));
         return { success: false, error: 'No content in response' };
       }
 
-      // Try to extract video URL from markdown format: ![video](url)
-      const urlPattern = /!\[.*?\]\((https?:\/\/[^)]+)\)/;
-      const urlMatch = content.match(urlPattern);
-      
-      if (urlMatch && urlMatch[1]) {
-        const videoUrl = urlMatch[1];
-        console.log('[VideoService] ✅ SORA Streaming video URL found:', videoUrl);
+      console.log('[VideoService] SORA content to parse:', content);
+
+      // Try multiple URL extraction patterns
+      // Pattern 1: Markdown link [text](url)
+      const markdownPattern = /\[click here\]\((https?:\/\/[^)]+)\)/i;
+      const markdownMatch = content.match(markdownPattern);
+      if (markdownMatch && markdownMatch[1]) {
+        const videoUrl = markdownMatch[1];
+        console.log('[VideoService] ✅ SORA video URL found (markdown):', videoUrl);
         return { success: true, videoUrl };
       }
 
-      // Try direct URL in content
-      const directUrlPattern = /(https?:\/\/[^\s]+\.mp4[^\s]*)/;
+      // Pattern 2: Markdown image ![alt](url)
+      const imageMarkdownPattern = /!\[.*?\]\((https?:\/\/[^)]+)\)/;
+      const imageMatch = content.match(imageMarkdownPattern);
+      if (imageMatch && imageMatch[1]) {
+        const videoUrl = imageMatch[1];
+        console.log('[VideoService] ✅ SORA video URL found (image markdown):', videoUrl);
+        return { success: true, videoUrl };
+      }
+
+      // Pattern 3: Direct URL with .mp4
+      const directUrlPattern = /(https?:\/\/[^\s)]+\.mp4[^\s)]*)/;
       const directMatch = content.match(directUrlPattern);
-      
       if (directMatch && directMatch[1]) {
         const videoUrl = directMatch[1];
-        console.log('[VideoService] ✅ SORA Streaming video URL found (direct):', videoUrl);
+        console.log('[VideoService] ✅ SORA video URL found (direct mp4):', videoUrl);
+        return { success: true, videoUrl };
+      }
+
+      // Pattern 4: Any https URL
+      const anyUrlPattern = /(https?:\/\/[^\s)]+)/;
+      const anyMatch = content.match(anyUrlPattern);
+      if (anyMatch && anyMatch[1]) {
+        const videoUrl = anyMatch[1];
+        console.log('[VideoService] ✅ SORA video URL found (generic):', videoUrl);
         return { success: true, videoUrl };
       }
 
       console.error('[VideoService] Could not extract video URL from content:', content);
-      return { success: false, error: 'Could not extract video URL from response' };
+      return { success: false, error: 'Could not extract video URL from response. Check logs for details.' };
 
     } catch (error) {
       console.error('[VideoService] SORA Streaming exception:', error);

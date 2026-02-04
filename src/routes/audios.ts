@@ -144,7 +144,7 @@ router.post('/preview-voice', async (req: Request, res: Response) => {
     const sampleText = "Hi, this is my voice!";
 
     const audioResponse = await cartesiaClient.tts.bytes({
-      model_id: 'sonic-turbo', // Modelo más rápido para previews
+      model_id: 'sonic-english', // Modelo estable
       transcript: sampleText,
       voice: {
         mode: 'id',
@@ -152,20 +152,20 @@ router.post('/preview-voice', async (req: Request, res: Response) => {
       },
       language: 'en',
       output_format: {
-        container: 'mp3',
-        encoding: 'mp3',
-        sample_rate: 22050,
+        container: 'wav',
+        encoding: 'pcm_f32le',
+        sample_rate: 44100, // Sample rate estándar para evitar distorsión
       }
     });
 
     const audioBuffer = Buffer.from(audioResponse);
     const audioBase64 = audioBuffer.toString('base64');
-    const audioDataUrl = `data:audio/mp3;base64,${audioBase64}`;
+    const audioDataUrl = `data:audio/wav;base64,${audioBase64}`;
 
     return res.status(200).json({
       success: true,
       audioUrl: audioDataUrl,
-      format: 'mp3'
+      format: 'wav'
     });
 
   } catch (error: any) {

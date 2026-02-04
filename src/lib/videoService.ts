@@ -1,0 +1,226 @@
+interface VideoGenerationResult {
+  success: boolean;
+  videoUrl?: string;
+  taskId?: string;
+  error?: string;
+}
+
+export class VideoGenerationService {
+  private apiKey: string;
+  private baseUrl: string;
+
+  constructor(apiKey: string) {
+    this.apiKey = apiKey;
+    this.baseUrl = "https://api.apiyi.com";
+  }
+
+  async generateVideo(
+    prompt: string,
+    model: string,
+    inputImage?: string
+  ): Promise<VideoGenerationResult> {
+    try {
+      // Determine which API to use based on model
+      if (model.includes('veo')) {
+        return await this.generateVeoVideo(prompt, model, inputImage);
+      } else if (model.includes('sora')) {
+        return await this.generateSoraVideo(prompt, model, inputImage);
+      } else {
+        return { success: false, error: 'Unsupported model' };
+      }
+    } catch (error) {
+      console.error('[VideoService] Error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  private async generateVeoVideo(
+    prompt: string,
+    model: string,
+    inputImage?: string
+  ): Promise<VideoGenerationResult> {
+    console.log('[VideoService] Generating VEO video:', { model, hasImage: !!inputImage });
+
+    // Map model names to VEO API format
+    const veoModelMap: Record<string, string> = {
+      'veo-3.1': 'veo3',
+      'veo-3.1-fast': 'veo3-fast',
+      'veo-3.1-pro': 'veo3-pro',
+      'veo3': 'veo3',
+      'veo3-fast': 'veo3-fast',
+      'veo3-pro': 'veo3-pro',
+    };
+
+    const veoModel = veoModelMap[model] || 'veo3';
+
+    // Submit task
+    const submitPayload: any = {
+      prompt,
+      model: veoModel,
+      enhance_prompt: false,
+    };
+
+    if (inputImage) {
+      submitPayload.images = [inputImage];
+    }
+
+    const submitResponse = await fetch(`${this.baseUrl}/veo/v1/api/video/submit`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify(submitPayload),
+    });
+
+    if (!submitResponse.ok) {
+      const errorText = await submitResponse.text();
+      console.error('[VideoService] VEO submit error:', errorText);
+      return { success: false, error: 'Failed to submit VEO task' };
+    }
+
+    const submitResult: any = await submitResponse.json();
+    console.log('[VideoService] VEO task submitted:', submitResult);
+
+    if (!submitResult.success || !submitResult.data?.taskId) {
+      return { success: false, error: 'Invalid VEO response' };
+    }
+
+    const { taskId, pollingUrl } = submitResult.data;
+
+    // Poll for result
+    const videoUrl = await this.pollVeoTask(pollingUrl, taskId);
+
+    if (videoUrl) {
+      return { success: true, videoUrl, taskId };
+    } else {
+      return { success: false, error: 'Failed to get video from VEO', taskId };
+    }
+  }
+
+  private async pollVeoTask(pollingUrl: string, taskId: string): Promise<string | null> {
+    const maxAttempts = 60; // 5 minutes max
+    const pollInterval = 5000; // 5 seconds
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+      try {
+        const response = await fetch(pollingUrl, {
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+        });
+
+        if (!response.ok) continue;
+
+        const result: any = await response.json();
+        console.log(`[VideoService] VEO poll attempt ${attempt + 1}:`, result.status);
+
+        if (result.status === 'completed' && result.data?.videoUrl) {
+          return result.data.videoUrl;
+        }
+
+        if (result.status === 'failed') {
+          console.error('[VideoService] VEO task failed:', result);
+          return null;
+        }
+      } catch (error) {
+        console.error('[VideoService] Polling error:', error);
+      }
+    }
+
+    console.error('[VideoService] VEO polling timeout');
+    return null;
+  }
+
+  private async generateSoraVideo(
+    prompt: string,
+    model: string,
+    inputImage?: string
+  ): Promise<VideoGenerationResult> {
+    console.log('[VideoService] Generating SORA video:', { model, hasImage: !!inputImage });
+
+    const submitPayload: any = {
+      prompt,
+      model: 'sora-2',
+      size: '1280x720',
+      seconds: '10',
+    };
+
+    // TODO: Handle input_reference file for Sora
+    // Sora requires multipart/form-data for image input
+
+    const submitResponse = await fetch(`${this.baseUrl}/v1/videos`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify(submitPayload),
+    });
+
+    if (!submitResponse.ok) {
+      const errorText = await submitResponse.text();
+      console.error('[VideoService] SORA submit error:', errorText);
+      return { success: false, error: 'Failed to submit SORA task' };
+    }
+
+    const submitResult: any = await submitResponse.json();
+    console.log('[VideoService] SORA task submitted:', submitResult);
+
+    if (!submitResult.video_id) {
+      return { success: false, error: 'Invalid SORA response' };
+    }
+
+    const videoId = submitResult.video_id;
+
+    // Poll for result
+    const videoUrl = await this.pollSoraTask(videoId);
+
+    if (videoUrl) {
+      return { success: true, videoUrl, taskId: videoId };
+    } else {
+      return { success: false, error: 'Failed to get video from SORA', taskId: videoId };
+    }
+  }
+
+  private async pollSoraTask(videoId: string): Promise<string | null> {
+    const maxAttempts = 60;
+    const pollInterval = 5000;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+      try {
+        const response = await fetch(`${this.baseUrl}/v1/videos/${videoId}`, {
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+        });
+
+        if (!response.ok) continue;
+
+        const result: any = await response.json();
+        console.log(`[VideoService] SORA poll attempt ${attempt + 1}:`, result.status);
+
+        if (result.status === 'completed' && result.video_url) {
+          return result.video_url;
+        }
+
+        if (result.status === 'failed') {
+          console.error('[VideoService] SORA task failed:', result);
+          return null;
+        }
+      } catch (error) {
+        console.error('[VideoService] Polling error:', error);
+      }
+    }
+
+    console.error('[VideoService] SORA polling timeout');
+    return null;
+  }
+}

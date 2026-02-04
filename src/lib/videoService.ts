@@ -23,9 +23,15 @@ export class VideoGenerationService {
     
     try {
       // Determine which API to use based on model
-      if (model.includes('veo')) {
-        console.log('[VideoService] Using VEO API');
-        return await this.generateVeoVideo(prompt, model, inputImage);
+      // VEO has TWO different APIs:
+      if (model.startsWith('veo-3.1')) {
+        // VEO Async API: veo-3.1, veo-3.1-fast, veo-3.1-landscape-fast ($0.15-$0.25)
+        console.log('[VideoService] Using VEO Async API (new)');
+        return await this.generateVeoAsyncVideo(prompt, model, inputImage);
+      } else if (model.startsWith('veo3') || model.includes('veo')) {
+        // VEO Sync API: veo3, veo3-fast, veo3-pro ($2.00-$10.00)
+        console.log('[VideoService] Using VEO Sync API (official)');
+        return await this.generateVeoSyncVideo(prompt, model, inputImage);
       } else if (model === 'sora-2' || model === 'sora-2-pro' || model === 'sora-character') {
         console.log('[VideoService] Using SORA Async API (with polling)');
         return await this.generateSoraAsyncVideo(prompt, model, inputImage);
@@ -45,39 +51,21 @@ export class VideoGenerationService {
     }
   }
 
-  private async generateVeoVideo(
+  private async generateVeoAsyncVideo(
     prompt: string,
     model: string,
     inputImage?: string
   ): Promise<VideoGenerationResult> {
-    console.log('[VideoService] Generating VEO video:', { model, hasImage: !!inputImage });
+    console.log('[VideoService] Generating VEO Async video:', { model, hasImage: !!inputImage });
 
     try {
-      // Map model names to VEO API format
-      const veoModelMap: Record<string, string> = {
-        'veo-3.1': 'veo3',
-        'veo-3.1-fast': 'veo3-fast',
-        'veo-3.1-pro': 'veo3-pro',
-        'veo3': 'veo3',
-        'veo3-fast': 'veo3-fast',
-        'veo3-pro': 'veo3-pro',
-      };
-
-      const veoModel = veoModelMap[model] || 'veo3';
-      console.log('[VideoService] Mapped model:', veoModel);
-
-      // Submit task
+      // VEO Async API uses model names as-is: veo-3.1, veo-3.1-fast, etc.
       const submitPayload: any = {
         prompt,
-        model: veoModel,
-        enhance_prompt: false,
+        model: model, // Use model name directly (no mapping needed)
       };
 
-      if (inputImage) {
-        submitPayload.images = [inputImage];
-      }
-
-      console.log('[VideoService] Submitting to VEO API...');
+      console.log('[VideoService] Submitting to VEO Async API...');
       console.log('[VideoService] Request URL:', `${this.baseUrl}/v1/videos`);
       console.log('[VideoService] Request payload:', JSON.stringify(submitPayload, null, 2));
       console.log('[VideoService] API Key (first 20 chars):', this.apiKey.substring(0, 20) + '...');
@@ -145,6 +133,125 @@ export class VideoGenerationService {
         error: error instanceof Error ? error.message : 'VEO generation failed',
       };
     }
+  }
+
+  private async generateVeoSyncVideo(
+    prompt: string,
+    model: string,
+    inputImage?: string
+  ): Promise<VideoGenerationResult> {
+    console.log('[VideoService] Generating VEO Sync video (Official API):', { model, hasImage: !!inputImage });
+
+    try {
+      // VEO Sync API (Official) - uses different endpoint
+      const submitPayload: any = {
+        prompt,
+        model: model, // veo3, veo3-fast, veo3-pro
+        enhance_prompt: false,
+      };
+
+      if (inputImage) {
+        submitPayload.images = [inputImage];
+      }
+
+      console.log('[VideoService] Submitting to VEO Sync API (Official)...');
+      console.log('[VideoService] Request URL:', `${this.baseUrl}/veo/v1/api/video/submit`);
+      console.log('[VideoService] Request payload:', JSON.stringify(submitPayload, null, 2));
+      
+      const submitResponse = await fetch(`${this.baseUrl}/veo/v1/api/video/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(submitPayload),
+      });
+
+      console.log('[VideoService] VEO Sync submit response status:', submitResponse.status);
+
+      if (!submitResponse.ok) {
+        const errorText = await submitResponse.text();
+        console.error('[VideoService] VEO Sync submit error:', errorText);
+        return { success: false, error: `VEO Sync API error: ${submitResponse.status}` };
+      }
+
+      const submitResult: any = await submitResponse.json();
+      console.log('[VideoService] VEO Sync task submitted:', JSON.stringify(submitResult, null, 2));
+
+      if (!submitResult.success || !submitResult.data?.taskId) {
+        console.error('[VideoService] Invalid VEO Sync response:', submitResult);
+        return { success: false, error: 'Invalid VEO Sync response' };
+      }
+
+      const { taskId, pollingUrl } = submitResult.data;
+      console.log('[VideoService] Starting VEO Sync polling:', { taskId, pollingUrl });
+
+      // Poll for result using the pollingUrl from response
+      const videoUrl = await this.pollVeoSyncTask(pollingUrl, taskId);
+
+      if (videoUrl) {
+        console.log('[VideoService] ✅ VEO Sync video generated successfully:', videoUrl);
+        return { success: true, videoUrl, taskId };
+      } else {
+        console.error('[VideoService] ❌ VEO Sync polling failed');
+        return { success: false, error: 'Failed to get video from VEO Sync', taskId };
+      }
+    } catch (error) {
+      console.error('[VideoService] VEO Sync generation error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'VEO Sync generation failed',
+      };
+    }
+  }
+
+  private async pollVeoSyncTask(pollingUrl: string, taskId: string): Promise<string | null> {
+    const maxAttempts = 60; // 10 minutes max (10s interval)
+    const pollInterval = 10000; // 10 seconds
+
+    console.log(`[VideoService] Starting VEO Sync polling for ${maxAttempts * pollInterval / 1000}s`);
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+      try {
+        console.log(`[VideoService] VEO Sync poll attempt ${attempt + 1}/${maxAttempts}`);
+        console.log(`[VideoService] Polling URL: ${pollingUrl}`);
+        
+        const response = await fetch(pollingUrl, {
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+        });
+
+        if (!response.ok) {
+          console.log(`[VideoService] VEO Sync poll ${attempt + 1}: Response not OK (${response.status})`);
+          continue;
+        }
+
+        const result: any = await response.json();
+        console.log(`[VideoService] VEO Sync poll ${attempt + 1}:`, JSON.stringify(result, null, 2));
+
+        // VEO Sync API response format
+        if (result.success && result.data?.status === 'completed' && result.data?.result?.video_url) {
+          const videoUrl = result.data.result.video_url;
+          console.log('[VideoService] ✅ VEO Sync video URL found:', videoUrl);
+          return videoUrl;
+        }
+
+        if (result.data?.status === 'failed') {
+          console.error('[VideoService] ❌ VEO Sync task failed:', result);
+          return null;
+        }
+
+        // Continue polling for processing status
+      } catch (error) {
+        console.error(`[VideoService] VEO Sync polling error on attempt ${attempt + 1}:`, error);
+      }
+    }
+
+    console.error('[VideoService] ❌ VEO Sync polling timeout after 10 minutes');
+    return null;
   }
 
   private async pollVeoTask(pollingUrl: string, taskId: string): Promise<string | null> {

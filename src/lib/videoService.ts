@@ -78,11 +78,11 @@ export class VideoGenerationService {
       }
 
       console.log('[VideoService] Submitting to VEO API...');
-      console.log('[VideoService] Request URL:', `${this.baseUrl}/veo/v1/api/video/submit`);
+      console.log('[VideoService] Request URL:', `${this.baseUrl}/v1/videos`);
       console.log('[VideoService] Request payload:', JSON.stringify(submitPayload, null, 2));
       console.log('[VideoService] API Key (first 20 chars):', this.apiKey.substring(0, 20) + '...');
       
-      const submitResponse = await fetch(`${this.baseUrl}/veo/v1/api/video/submit`, {
+      const submitResponse = await fetch(`${this.baseUrl}/v1/videos`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -104,7 +104,7 @@ export class VideoGenerationService {
       }
 
       // Check if response is HTML instead of JSON
-      if (responseText.trim().startsWith('<!') || responseText.trim().startsWith('<html')) {
+      if (responseText.trim().startsWith('<!doctype') || responseText.trim().startsWith('<html')) {
         console.error('[VideoService] VEO returned HTML instead of JSON');
         return { success: false, error: 'VEO API returned HTML - check API key or endpoint' };
       }
@@ -112,21 +112,23 @@ export class VideoGenerationService {
       let submitResult: any;
       try {
         submitResult = JSON.parse(responseText);
-        console.log('[VideoService] VEO task submitted:', submitResult);
+        console.log('[VideoService] VEO task submitted:', JSON.stringify(submitResult, null, 2));
       } catch (parseError) {
         console.error('[VideoService] Failed to parse VEO response:', parseError);
         return { success: false, error: 'Invalid JSON response from VEO API' };
       }
 
-      if (!submitResult.success || !submitResult.data?.taskId) {
-        console.error('[VideoService] Invalid VEO response structure:', submitResult);
-        return { success: false, error: 'Invalid VEO response' };
+      // VEO uses same format as SORA: { id, status, model, etc }
+      const taskId = submitResult.id;
+      if (!taskId) {
+        console.error('[VideoService] No task ID in VEO response:', submitResult);
+        return { success: false, error: 'Invalid VEO response - no task ID' };
       }
 
-      const { taskId, pollingUrl } = submitResult.data;
-      console.log('[VideoService] Starting polling:', { taskId, pollingUrl });
+      console.log('[VideoService] Starting VEO polling for task ID:', taskId);
 
-      // Poll for result
+      // Poll for result using /v1/videos/{id} endpoint
+      const pollingUrl = `${this.baseUrl}/v1/videos/${taskId}`;
       const videoUrl = await this.pollVeoTask(pollingUrl, taskId);
 
       if (videoUrl) {
@@ -149,35 +151,51 @@ export class VideoGenerationService {
     const maxAttempts = 60; // 5 minutes max
     const pollInterval = 5000; // 5 seconds
 
+    console.log(`[VideoService] Starting VEO polling for ${maxAttempts * pollInterval / 1000}s`);
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise(resolve => setTimeout(resolve, pollInterval));
 
       try {
+        console.log(`[VideoService] VEO poll attempt ${attempt + 1}/${maxAttempts}`);
+        
         const response = await fetch(pollingUrl, {
           headers: {
             Authorization: `Bearer ${this.apiKey}`,
           },
         });
 
-        if (!response.ok) continue;
+        if (!response.ok) {
+          console.log(`[VideoService] VEO poll ${attempt + 1}: Response not OK (${response.status})`);
+          continue;
+        }
 
         const result: any = await response.json();
-        console.log(`[VideoService] VEO poll attempt ${attempt + 1}:`, result.status);
+        console.log(`[VideoService] VEO poll ${attempt + 1}:`, JSON.stringify(result, null, 2));
 
-        if (result.status === 'completed' && result.data?.videoUrl) {
-          return result.data.videoUrl;
+        // Check for completed status - VEO uses same format as SORA
+        if (result.status === 'completed' || result.status === 'succeeded') {
+          const videoUrl = result.video_url || result.videoUrl || result.url || 
+                          result.output?.video_url || result.data?.videoUrl;
+          
+          if (videoUrl) {
+            console.log('[VideoService] ✅ VEO video URL found:', videoUrl);
+            return videoUrl;
+          }
         }
 
-        if (result.status === 'failed') {
-          console.error('[VideoService] VEO task failed:', result);
+        if (result.status === 'failed' || result.status === 'error') {
+          console.error('[VideoService] ❌ VEO task failed:', result);
           return null;
         }
+
+        // Continue polling for queued/in_progress
       } catch (error) {
-        console.error('[VideoService] Polling error:', error);
+        console.error(`[VideoService] VEO polling error on attempt ${attempt + 1}:`, error);
       }
     }
 
-    console.error('[VideoService] VEO polling timeout');
+    console.error('[VideoService] ❌ VEO polling timeout after 5 minutes');
     return null;
   }
 

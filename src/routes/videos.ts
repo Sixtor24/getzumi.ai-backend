@@ -13,14 +13,23 @@ async function processVideoInBackground(
   inputImage: string | undefined,
   apiKey: string
 ) {
-  console.log(`[Background] Processing SORA video ${videoId}`);
+  console.log(`[Background] Starting video processing for ${videoId} with model ${model}`);
   
   try {
     const videoService = new VideoGenerationService(apiKey);
+    console.log(`[Background] Calling videoService.generateVideo for ${videoId}`);
+    
     const result = await videoService.generateVideo(prompt, model, inputImage);
+    
+    console.log(`[Background] Result for ${videoId}:`, { 
+      success: result.success, 
+      hasVideoUrl: !!result.videoUrl,
+      error: result.error 
+    });
     
     if (result.success && result.videoUrl) {
       // Update video with success
+      console.log(`[Background] Updating DB with success for ${videoId}`);
       await prisma.video.update({
         where: { id: videoId },
         data: {
@@ -29,9 +38,10 @@ async function processVideoInBackground(
           updatedAt: new Date()
         }
       });
-      console.log(`[Background] ✅ Video ${videoId} completed:`, result.videoUrl);
+      console.log(`[Background] ✅ Video ${videoId} completed and saved:`, result.videoUrl);
     } else {
       // Update video with error
+      console.log(`[Background] Updating DB with failure for ${videoId}`);
       await prisma.video.update({
         where: { id: videoId },
         data: {
@@ -43,7 +53,13 @@ async function processVideoInBackground(
       console.error(`[Background] ❌ Video ${videoId} failed:`, result.error);
     }
   } catch (error) {
-    console.error(`[Background] Exception processing video ${videoId}:`, error);
+    console.error(`[Background] ⚠️ Exception processing video ${videoId}:`, error);
+    console.error(`[Background] Error details:`, {
+      name: error instanceof Error ? error.name : 'Unknown',
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    
     await prisma.video.update({
       where: { id: videoId },
       data: {

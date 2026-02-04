@@ -369,15 +369,36 @@ export class VideoGenerationService {
       console.log('[VideoService] Model:', model);
       console.log('[VideoService] Payload:', JSON.stringify(payload, null, 2));
 
-      const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify(payload),
-      });
+      // Add timeout for streaming API (15 minutes max)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15 * 60 * 1000); // 15 minutes
 
+      console.log('[VideoService] Waiting for SORA Streaming response (max 15 minutes)...');
+      const startTime = Date.now();
+
+      let response;
+      try {
+        response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.apiKey}`,
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+      } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+          console.error('[VideoService] SORA Streaming timeout after 15 minutes');
+          return { success: false, error: 'Video generation timeout (15 minutes)' };
+        }
+        throw error;
+      }
+
+      clearTimeout(timeoutId);
+      const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+      console.log(`[VideoService] SORA Streaming response received in ${elapsedTime}s`);
       console.log('[VideoService] SORA Streaming response status:', response.status);
 
       if (!response.ok) {

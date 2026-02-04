@@ -4,17 +4,39 @@ interface GenerateImageResult {
   error?: string;
 }
 
+// Model configuration mapping
+const MODEL_CONFIG: Record<string, { api: string; endpoint: string; type: 'standard' | 'chat' | 'edit' }> = {
+  // SeeDream Models - Standard Image API
+  'seedream-4-5-251128': { api: 'standard', endpoint: '/v1/images/generations', type: 'standard' },
+  'seedream-4-0-250828': { api: 'standard', endpoint: '/v1/images/generations', type: 'standard' },
+  
+  // Nano Banana Models - Chat Completions API
+  'gemini-3-pro-image-preview': { api: 'chat', endpoint: '/v1/chat/completions', type: 'chat' },
+  'gemini-2.5-flash-image': { api: 'chat', endpoint: '/v1/chat/completions', type: 'chat' },
+  
+  // GPT Image Models - Standard Image API
+  'gpt-image-1': { api: 'standard', endpoint: '/v1/images/generations', type: 'standard' },
+  'gpt-image-1-mini': { api: 'standard', endpoint: '/v1/images/generations', type: 'standard' },
+  
+  // Sora Image - Chat Completions API
+  'sora_image': { api: 'chat', endpoint: '/v1/chat/completions', type: 'chat' },
+  
+  // Flux Models - Standard Image API
+  'flux-pro-1.1': { api: 'standard', endpoint: '/v1/images/generations', type: 'standard' },
+  'flux-kontext-pro': { api: 'edit', endpoint: '/v1/images/edits', type: 'edit' },
+  'flux-kontext-max': { api: 'edit', endpoint: '/v1/images/edits', type: 'edit' },
+};
+
 export class GeminiImageService {
   private apiKey: string;
-  private apiUrl: string;
   private headers: Record<string, string>;
+  private baseUrl: string = "https://api.apiyi.com";
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
-    this.apiUrl = "https://api.apiyi.com/v1/chat/completions";
     this.headers = {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
+      "Authorization": `Bearer ${this.apiKey}`
     };
   }
 
@@ -55,14 +77,39 @@ export class GeminiImageService {
   }
 
   async generateImages(prompt: string, model: string, inputImages: string[] = [], count: number = 4): Promise<GenerateImageResult> {
-    let currentApiUrl = "https://api.apiyi.com/v1/chat/completions";
-    let isChatModel = true;
-
-    if (model.includes('seedream') || model.includes('dall-e')) {
-      currentApiUrl = "https://api.apiyi.com/v1/images/generations"; 
-      isChatModel = false;
+    console.log(`[GeminiService] Generating ${count} images with model: ${model}`);
+    
+    // Get model configuration
+    const config = MODEL_CONFIG[model];
+    if (!config) {
+      console.error(`[GeminiService] Unknown model: ${model}. Using default chat model.`);
+      return this.generateWithChatAPI(prompt, model, count);
     }
 
+    const currentApiUrl = `${this.baseUrl}${config.endpoint}`;
+    console.log(`[GeminiService] Using ${config.type} API: ${currentApiUrl}`);
+
+    // Route to appropriate API handler
+    switch (config.type) {
+      case 'standard':
+        return this.generateWithStandardAPI(prompt, model, inputImages, count, currentApiUrl);
+      case 'chat':
+        return this.generateWithChatAPI(prompt, model, count, currentApiUrl);
+      case 'edit':
+        console.warn(`[GeminiService] Edit models (${model}) require mask images. Use edit API instead.`);
+        return { success: false, error: 'Edit models require mask images. Use image edit endpoint.' };
+      default:
+        return { success: false, error: `Unsupported model type: ${config.type}` };
+    }
+  }
+
+  private async generateWithStandardAPI(
+    prompt: string,
+    model: string,
+    inputImages: string[],
+    count: number,
+    apiUrl: string
+  ): Promise<GenerateImageResult> {
     const buffers: Buffer[] = [];
 
     if (!isChatModel) {

@@ -1,17 +1,17 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma.js';
 import jwt from 'jsonwebtoken';
-import { GeminiImageService } from '../lib/gemini.js';
+import { ImageGenerationService } from '../lib/imageService.js';
 import sharp from 'sharp';
 
 const router = Router();
 
-// Generate Image
+// Generate Image - Supports all APIYI models
 router.post('/generate', async (req: Request, res: Response) => {
   try {
     const { prompt, model = "gemini-3-pro-image-preview", input_images = [], count = 4 } = req.body;
 
-    console.log('[API /images/generate] Received body:', { 
+    console.log('[API /images/generate] Received request:', { 
       prompt: prompt.substring(0, 50) + '...', 
       model, 
       count, 
@@ -23,14 +23,17 @@ router.post('/generate', async (req: Request, res: Response) => {
       return res.status(500).json({ success: false, message: "API Key not configured" });
     }
 
-    const service = new GeminiImageService(apiKey);
-    console.log('[API /images/generate] Calling generateImages with count:', count);
+    const service = new ImageGenerationService(apiKey);
     const result = await service.generateImages(prompt, model, input_images, count);
 
     if (!result.success || !result.data || result.data.length === 0) {
-      return res.status(502).json({ success: false, message: result.error });
+      return res.status(502).json({ 
+        success: false, 
+        message: result.error || "Failed to generate images" 
+      });
     }
 
+    // Compress images for faster delivery
     const compressedImages = await Promise.all(result.data.map(buffer => 
       sharp(buffer)
         .jpeg({ quality: 70, mozjpeg: true })
@@ -39,16 +42,16 @@ router.post('/generate', async (req: Request, res: Response) => {
 
     const candidates = compressedImages.map(buf => `data:image/jpeg;base64,${buf.toString('base64')}`);
 
-    console.log(`[API /images/generate] Generated ${candidates.length} images with count=${count}`);
+    console.log(`[API /images/generate] Successfully generated ${candidates.length} images`);
 
     return res.status(200).json({
       success: true,
       candidates: candidates,
-      message: `Generated ${candidates.length} candidate${candidates.length > 1 ? 's' : ''}. Please select one to save.`
+      message: `Generated ${candidates.length} image${candidates.length > 1 ? 's' : ''}. Select one to save.`
     });
 
   } catch (error) {
-    console.error(error);
+    console.error('[API /images/generate] Error:', error);
     const msg = error instanceof Error ? error.message : "Generation Error";
     return res.status(500).json({ success: false, message: msg });
   }

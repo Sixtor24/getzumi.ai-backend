@@ -8,6 +8,7 @@ import audioRoutes from './routes/audios.js';
 import textRoutes from './routes/texts.js';
 import projectRoutes from './routes/projects.js';
 import subscriptionRoutes from './routes/subscriptions.js';
+import actorRoutes from './routes/actors.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 // CORS configuration
@@ -52,6 +53,7 @@ app.use('/api/images', imageRoutes);
 app.use('/api/videos', videoRoutes);
 app.use('/api/audios', audioRoutes);
 app.use('/api/texts', textRoutes);
+app.use('/api/actors', actorRoutes);
 // 404 handler
 app.use((req, res) => {
     res.status(404).json({ success: false, message: 'Route not found' });

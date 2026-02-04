@@ -85,15 +85,31 @@ export class VideoGenerationService {
       });
 
       console.log('[VideoService] VEO submit response status:', submitResponse.status);
+      console.log('[VideoService] VEO response headers:', Object.fromEntries(submitResponse.headers.entries()));
+
+      // Get response as text first to check if it's HTML
+      const responseText = await submitResponse.text();
+      console.log('[VideoService] VEO response (first 500 chars):', responseText.substring(0, 500));
 
       if (!submitResponse.ok) {
-        const errorText = await submitResponse.text();
-        console.error('[VideoService] VEO submit error:', errorText);
+        console.error('[VideoService] VEO submit error:', responseText);
         return { success: false, error: `VEO API error: ${submitResponse.status}` };
       }
 
-      const submitResult: any = await submitResponse.json();
-      console.log('[VideoService] VEO task submitted:', submitResult);
+      // Check if response is HTML instead of JSON
+      if (responseText.trim().startsWith('<!') || responseText.trim().startsWith('<html')) {
+        console.error('[VideoService] VEO returned HTML instead of JSON');
+        return { success: false, error: 'VEO API returned HTML - check API key or endpoint' };
+      }
+
+      let submitResult: any;
+      try {
+        submitResult = JSON.parse(responseText);
+        console.log('[VideoService] VEO task submitted:', submitResult);
+      } catch (parseError) {
+        console.error('[VideoService] Failed to parse VEO response:', parseError);
+        return { success: false, error: 'Invalid JSON response from VEO API' };
+      }
 
       if (!submitResult.success || !submitResult.data?.taskId) {
         console.error('[VideoService] Invalid VEO response structure:', submitResult);

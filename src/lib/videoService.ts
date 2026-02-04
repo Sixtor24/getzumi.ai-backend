@@ -26,9 +26,12 @@ export class VideoGenerationService {
       if (model.includes('veo')) {
         console.log('[VideoService] Using VEO API');
         return await this.generateVeoVideo(prompt, model, inputImage);
+      } else if (model === 'sora-2' || model === 'sora-2-pro' || model === 'sora-character') {
+        console.log('[VideoService] Using SORA Async API (with polling)');
+        return await this.generateSoraAsyncVideo(prompt, model, inputImage);
       } else if (model.includes('sora')) {
-        console.log('[VideoService] Using SORA API');
-        return await this.generateSoraVideo(prompt, model, inputImage);
+        console.log('[VideoService] Using SORA Streaming API (instant response)');
+        return await this.generateSoraStreamingVideo(prompt, model, inputImage);
       } else {
         console.error('[VideoService] Unsupported model:', model);
         return { success: false, error: `Unsupported model: ${model}` };
@@ -178,12 +181,12 @@ export class VideoGenerationService {
     return null;
   }
 
-  private async generateSoraVideo(
+  private async generateSoraAsyncVideo(
     prompt: string,
     model: string,
     inputImage?: string
   ): Promise<VideoGenerationResult> {
-    console.log('[VideoService] Generating SORA video:', { model, hasImage: !!inputImage });
+    console.log('[VideoService] Generating SORA Async video:', { model, hasImage: !!inputImage });
 
     try {
       // SORA-2 API oficial usa JSON con Bearer
@@ -330,5 +333,98 @@ export class VideoGenerationService {
 
     console.error(`[VideoService] ❌ SORA polling timeout after ${maxAttempts} attempts (${maxAttempts * pollInterval / 1000 / 60} minutes)`);
     return null;
+  }
+
+  private async generateSoraStreamingVideo(
+    prompt: string,
+    model: string,
+    inputImage?: string
+  ): Promise<VideoGenerationResult> {
+    console.log('[VideoService] Generating SORA Streaming video:', { model, hasImage: !!inputImage });
+
+    try {
+      // SORA Video2 Streaming API - instant response, no polling needed
+      // Endpoint: /v1/chat/completions (streaming mode)
+      const payload: any = {
+        model: model,
+        stream: false,
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      };
+
+      // Add input image if provided
+      if (inputImage) {
+        payload.messages[0].content = [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: inputImage } }
+        ];
+      }
+
+      console.log('[VideoService] Submitting to SORA Streaming API...');
+      console.log('[VideoService] Request URL:', `${this.baseUrl}/v1/chat/completions`);
+      console.log('[VideoService] Model:', model);
+      console.log('[VideoService] Payload:', JSON.stringify(payload, null, 2));
+
+      const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      console.log('[VideoService] SORA Streaming response status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[VideoService] SORA Streaming error:', errorText);
+        return { success: false, error: `SORA Streaming API error ${response.status}: ${errorText}` };
+      }
+
+      const result: any = await response.json();
+      console.log('[VideoService] SORA Streaming response:', JSON.stringify(result, null, 2));
+
+      // Extract video URL from response
+      const content = result.choices?.[0]?.message?.content;
+      if (!content) {
+        console.error('[VideoService] No content in SORA Streaming response');
+        return { success: false, error: 'No content in response' };
+      }
+
+      // Try to extract video URL from markdown format: ![video](url)
+      const urlPattern = /!\[.*?\]\((https?:\/\/[^)]+)\)/;
+      const urlMatch = content.match(urlPattern);
+      
+      if (urlMatch && urlMatch[1]) {
+        const videoUrl = urlMatch[1];
+        console.log('[VideoService] ✅ SORA Streaming video URL found:', videoUrl);
+        return { success: true, videoUrl };
+      }
+
+      // Try direct URL in content
+      const directUrlPattern = /(https?:\/\/[^\s]+\.mp4[^\s]*)/;
+      const directMatch = content.match(directUrlPattern);
+      
+      if (directMatch && directMatch[1]) {
+        const videoUrl = directMatch[1];
+        console.log('[VideoService] ✅ SORA Streaming video URL found (direct):', videoUrl);
+        return { success: true, videoUrl };
+      }
+
+      console.error('[VideoService] Could not extract video URL from content:', content);
+      return { success: false, error: 'Could not extract video URL from response' };
+
+    } catch (error) {
+      console.error('[VideoService] SORA Streaming exception:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'SORA Streaming failed',
+      };
+    }
   }
 }

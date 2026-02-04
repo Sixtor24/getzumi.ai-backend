@@ -201,7 +201,7 @@ export class VideoGenerationService {
       const submitResponse = await fetch(`${this.baseUrl}/v1/videos`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
+          'Authorization': this.apiKey,  // SORA no usa "Bearer" con multipart/form-data
           ...formData.getHeaders(),
         },
         body: formData as any,

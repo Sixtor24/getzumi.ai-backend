@@ -152,20 +152,20 @@ router.post('/preview-voice', async (req: Request, res: Response) => {
       },
       language: 'en',
       output_format: {
-        container: 'wav',
-        encoding: 'pcm_f32le',
+        container: 'mp3',
+        encoding: 'mp3',
         sample_rate: 44100, // Sample rate estándar para evitar distorsión
       }
     });
 
     const audioBuffer = Buffer.from(audioResponse);
     const audioBase64 = audioBuffer.toString('base64');
-    const audioDataUrl = `data:audio/wav;base64,${audioBase64}`;
+    const audioDataUrl = `data:audio/mpeg;base64,${audioBase64}`;
 
     return res.status(200).json({
       success: true,
       audioUrl: audioDataUrl,
-      format: 'wav'
+      format: 'mp3'
     });
 
   } catch (error: any) {

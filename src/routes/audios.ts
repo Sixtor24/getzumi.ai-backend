@@ -143,20 +143,25 @@ router.post('/preview-voice', async (req: Request, res: Response) => {
     // Texto de prueba MUY corto para preview rápido
     const sampleText = "Hi, this is my voice!";
 
+    // Usar sonic-3 con generation_config para control preciso de velocidad
     const audioResponse = await cartesiaClient.tts.bytes({
-      model_id: 'sonic-english', // Modelo estable
+      model_id: 'sonic-3',
       transcript: sampleText,
       voice: {
         mode: 'id',
         id: voiceId,
       },
       language: 'en',
+      generation_config: {
+        speed: 1.0, // Velocidad normal (0.6 - 1.5)
+        volume: 1.0, // Volumen normal (0.5 - 2.0)
+      },
       output_format: {
         container: 'mp3',
-        encoding: 'mp3',
-        sample_rate: 44100, // Sample rate estándar para evitar distorsión
-      }
-    });
+        sample_rate: 44100,
+        bit_rate: 128000,
+      },
+    } as any);
 
     const audioBuffer = Buffer.from(audioResponse);
     const audioBase64 = audioBuffer.toString('base64');

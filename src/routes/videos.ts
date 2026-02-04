@@ -85,12 +85,12 @@ router.post('/generate', async (req: Request, res: Response) => {
       return res.status(500).json({ success: false, message: "API Configuration Missing" });
     }
 
-    // Check if model is SORA Streaming (needs async processing)
-    const isSoraStreaming = model && (model.startsWith('sora_video2') || model.startsWith('sora-2-pro'));
+    // Check if model needs async processing (ALL models to avoid Railway timeout)
+    const needsAsyncProcessing = true; // Enable async for all video models
     
-    if (isSoraStreaming) {
-      // SORA Streaming: Create pending video and process in background
-      console.log('[Video Generate] SORA Streaming detected - using async processing');
+    if (needsAsyncProcessing) {
+      // All models: Create pending video and process in background
+      console.log('[Video Generate] Using async processing for model:', model);
       
       const pendingVideo = await prisma.video.create({
         data: {

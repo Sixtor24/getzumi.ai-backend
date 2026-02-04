@@ -22,11 +22,13 @@ router.post('/generate', async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, message: "Invalid session" });
     }
 
-    const { prompt, model, input_image } = req.body;
+    const { prompt, model, input_image, projectId } = req.body;
     
     if (!prompt) {
       return res.status(400).json({ success: false, message: "Prompt is required" });
     }
+
+    console.log('[Video Generate] Request data:', { prompt, model, hasInputImage: !!input_image, projectId });
 
     const apiKey = process.env.APIYI_API_KEY;
     if (!apiKey) {
@@ -62,6 +64,7 @@ router.post('/generate', async (req: Request, res: Response) => {
         model: model || "veo-3.1",
         videoUrl: result.videoUrl!,
         status: "completed",
+        projectId: projectId || null,
         createdAt: new Date()
       }
     });

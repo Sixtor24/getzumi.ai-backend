@@ -52,6 +52,7 @@ model Project {
   description String?
   metadata    Json?
   images      Image[]
+  videos      Video[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   
@@ -63,6 +64,8 @@ model Video {
   id          String   @id @default(uuid())
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   prompt      String
   model       String
   videoUrl    String
@@ -72,6 +75,7 @@ model Video {
   updatedAt   DateTime @updatedAt
   
   @@index([userId])
+  @@index([projectId])
 }
 
 model Image {

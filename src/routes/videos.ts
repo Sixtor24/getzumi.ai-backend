@@ -5,7 +5,53 @@ import { VideoGenerationService } from '../lib/videoService.js';
 
 const router = Router();
 
-// No background processing needed - just submit task and let polling handle it
+// Background processing for SORA (uses streaming)
+async function processVideoInBackground(
+  videoId: string,
+  prompt: string,
+  model: string,
+  inputImage: string | undefined,
+  apiKey: string
+) {
+  console.log(`[SORA Background] Starting streaming for ${videoId}`);
+  
+  try {
+    const videoService = new VideoGenerationService(apiKey);
+    const result = await videoService.generateVideo(prompt, model, inputImage);
+    
+    if (result.success && result.videoUrl) {
+      await prisma.video.update({
+        where: { id: videoId },
+        data: {
+          videoUrl: result.videoUrl,
+          status: 'completed',
+          updatedAt: new Date()
+        }
+      });
+      console.log(`[SORA Background] ✅ Video ${videoId} completed:`, result.videoUrl);
+    } else {
+      await prisma.video.update({
+        where: { id: videoId },
+        data: {
+          status: 'failed',
+          metadata: { error: result.error || 'Unknown error' },
+          updatedAt: new Date()
+        }
+      });
+      console.error(`[SORA Background] ❌ Video ${videoId} failed:`, result.error);
+    }
+  } catch (error) {
+    console.error(`[SORA Background] ⚠️ Exception for ${videoId}:`, error);
+    await prisma.video.update({
+      where: { id: videoId },
+      data: {
+        status: 'failed',
+        metadata: { error: error instanceof Error ? error.message : 'Processing error' },
+        updatedAt: new Date()
+      }
+    });
+  }
+}
 
 // Generate Video using VEO/SORA APIs
 router.post('/generate', async (req: Request, res: Response) => {
@@ -37,48 +83,88 @@ router.post('/generate', async (req: Request, res: Response) => {
       return res.status(500).json({ success: false, message: "API Configuration Missing" });
     }
 
-    // NEW ARCHITECTURE: Submit task only (no waiting)
-    console.log('[Video Generate] Submitting task for model:', model);
-    
     const videoService = new VideoGenerationService(apiKey);
-    const submitResult = await videoService.submitTask(prompt, model, input_image);
+
+    // VEO: New architecture (submit + poll)
+    if (model.includes('veo')) {
+      console.log('[Video Generate] VEO - Using submit+poll architecture');
+      
+      const submitResult = await videoService.submitTask(prompt, model, input_image);
+      
+      if (!submitResult.success || !submitResult.taskId) {
+        console.error('[Video Generate] Failed to submit VEO task:', submitResult.error);
+        return res.status(500).json({
+          success: false,
+          message: submitResult.error || 'Failed to submit video generation task'
+        });
+      }
+      
+      console.log('[Video Generate] VEO task submitted:', submitResult.taskId);
+      
+      // Create video record with apiTaskId
+      const video = await prisma.video.create({
+        data: {
+          userId: userId,
+          prompt: prompt,
+          model: model,
+          videoUrl: '',
+          apiTaskId: submitResult.taskId,
+          status: 'queued',
+          projectId: projectId || null,
+          metadata: { input_image: !!input_image },
+          createdAt: new Date()
+        }
+      });
+
+      console.log('[Video Generate] ✅ VEO video record created:', video.id);
+      
+      return res.status(200).json({
+        success: true,
+        video: {
+          id: video.id,
+          status: 'queued',
+          apiTaskId: submitResult.taskId,
+          message: 'Video generation task submitted. Poll /api/videos/status/:id to check progress.'
+        }
+      });
+    } 
     
-    if (!submitResult.success || !submitResult.taskId) {
-      console.error('[Video Generate] Failed to submit task:', submitResult.error);
-      return res.status(500).json({
-        success: false,
-        message: submitResult.error || 'Failed to submit video generation task'
+    // SORA: Streaming in background (old architecture)
+    else if (model.includes('sora')) {
+      console.log('[Video Generate] SORA - Using streaming+background architecture');
+      
+      // Create pending video record
+      const pendingVideo = await prisma.video.create({
+        data: {
+          userId: userId,
+          prompt: prompt,
+          model: model,
+          videoUrl: '',
+          status: 'processing',
+          projectId: projectId || null,
+          metadata: { input_image: !!input_image },
+          createdAt: new Date()
+        }
+      });
+
+      console.log('[Video Generate] ✅ SORA video record created:', pendingVideo.id);
+
+      // Process in background with streaming
+      processVideoInBackground(pendingVideo.id, prompt, model, input_image, apiKey);
+      
+      return res.status(200).json({
+        success: true,
+        video: {
+          id: pendingVideo.id,
+          status: 'processing',
+          message: 'Video generation started. Poll /api/videos/status/:id to check progress.'
+        }
       });
     }
-    
-    console.log('[Video Generate] Task submitted successfully:', submitResult.taskId);
-    
-    // Create video record with apiTaskId
-    const video = await prisma.video.create({
-      data: {
-        userId: userId,
-        prompt: prompt,
-        model: model,
-        videoUrl: '',
-        apiTaskId: submitResult.taskId,
-        status: 'queued',
-        projectId: projectId || null,
-        metadata: { input_image: !!input_image },
-        createdAt: new Date()
-      }
-    });
 
-    console.log('[Video Generate] ✅ Video record created:', video.id);
-    
-    // Return immediately with video ID
-    return res.status(200).json({
-      success: true,
-      video: {
-        id: video.id,
-        status: 'queued',
-        apiTaskId: submitResult.taskId,
-        message: 'Video generation task submitted. Poll /api/videos/status/:id to check progress.'
-      }
+    return res.status(400).json({
+      success: false,
+      message: 'Unsupported model'
     });
 
   } catch (error) {

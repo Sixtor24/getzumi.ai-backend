@@ -723,10 +723,14 @@ export class VideoGenerationService {
           return { success: true, status: 'completed', videoUrl: data.url };
         } else if (data.status === 'failed') {
           return { success: false, status: 'failed', error: data.error || 'Generation failed' };
-        } else if (data.status === 'processing') {
+        } else if (data.status === 'processing' || data.status === 'in_progress') {
           return { success: true, status: 'processing' };
-        } else {
+        } else if (data.status === 'queued') {
           return { success: true, status: 'queued' };
+        } else {
+          // Unknown status - log it and return as processing
+          console.warn('[VideoService] Unknown VEO status:', data.status);
+          return { success: true, status: 'processing' };
         }
         
       } else if (model.includes('sora')) {

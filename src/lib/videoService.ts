@@ -191,7 +191,7 @@ export class VideoGenerationService {
       const submitPayload: any = {
         model: 'sora-2',
         prompt: prompt,
-        seconds: 8,  // Number, not string
+        seconds: '8',  // MUST be string according to API error
         size: '1280x720'  // Landscape by default
       };
 

@@ -254,23 +254,40 @@ export class VideoGenerationService {
   }
 
   private async pollSoraTask(videoId: string): Promise<string | null> {
-    const maxAttempts = 60; // 10 minutes max (10 segundos por intento)
+    const maxAttempts = 120; // 20 minutes max (10 segundos por intento)
     const pollInterval = 10000; // 10 segundos según documentación
 
+    console.log(`[VideoService] Starting SORA polling for video ID: ${videoId}`);
+    console.log(`[VideoService] Will poll up to ${maxAttempts} times (${maxAttempts * pollInterval / 1000 / 60} minutes)`);
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      // Wait before polling (except first attempt - check immediately)
+      if (attempt > 0) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      }
 
       try {
-        const response = await fetch(`${this.baseUrl}/v1/videos/${videoId}`, {
+        const pollUrl = `${this.baseUrl}/v1/videos/${videoId}`;
+        console.log(`[VideoService] SORA poll attempt ${attempt + 1}/${maxAttempts} - URL: ${pollUrl}`);
+        
+        const response = await fetch(pollUrl, {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
           },
         });
 
+        console.log(`[VideoService] SORA poll ${attempt + 1} - Status: ${response.status}`);
+
         if (!response.ok) {
-          console.log(`[VideoService] SORA poll ${attempt + 1}: Response not OK (${response.status})`);
           const errorText = await response.text();
-          console.error(`[VideoService] SORA poll error response:`, errorText);
+          console.error(`[VideoService] SORA poll ${attempt + 1} error (${response.status}):`, errorText);
+          
+          // If 404, the video ID might be invalid
+          if (response.status === 404) {
+            console.error('[VideoService] Video ID not found - stopping polling');
+            return null;
+          }
+          
           continue;
         }
 
@@ -278,34 +295,40 @@ export class VideoGenerationService {
         console.log(`[VideoService] SORA poll ${attempt + 1} - Full response:`, JSON.stringify(result, null, 2));
 
         // Check for completed status with multiple possible URL field names
-        if (result.status === 'completed') {
-          const videoUrl = result.video_url || result.videoUrl || result.url || result.output?.video_url;
+        if (result.status === 'completed' || result.status === 'succeeded' || result.status === 'success') {
+          const videoUrl = result.video_url || result.videoUrl || result.url || 
+                          result.output?.video_url || result.output?.url ||
+                          result.data?.video_url || result.data?.url;
           
           if (videoUrl) {
-            console.log('[VideoService] SORA video URL found:', videoUrl);
+            console.log('[VideoService] ✅ SORA video URL found:', videoUrl);
             return videoUrl;
           } else {
-            console.error('[VideoService] SORA completed but no video URL found in response:', result);
+            console.error('[VideoService] ⚠️ SORA marked as completed but no video URL found');
+            console.error('[VideoService] Full result object:', JSON.stringify(result, null, 2));
+            // Continue polling in case URL appears later
           }
         }
 
-        if (result.status === 'failed' || result.status === 'error') {
-          console.error('[VideoService] SORA task failed:', result);
+        if (result.status === 'failed' || result.status === 'error' || result.status === 'cancelled') {
+          console.error('[VideoService] ❌ SORA task failed with status:', result.status);
+          console.error('[VideoService] Error details:', result.error || result.message || 'No error details');
           return null;
         }
 
         // Log progress for in_progress status
-        if (result.status === 'in_progress' && result.progress) {
-          console.log(`[VideoService] SORA progress: ${result.progress}%`);
-        }
+        const status = result.status || 'unknown';
+        const progress = result.progress || result.percent || 'unknown';
+        console.log(`[VideoService] SORA status: ${status}, progress: ${progress}`);
 
-        // Status: queued, in_progress - continue polling
+        // Status: queued, in_progress, processing - continue polling
       } catch (error) {
-        console.error(`[VideoService] SORA polling error on attempt ${attempt + 1}:`, error);
+        console.error(`[VideoService] SORA polling exception on attempt ${attempt + 1}:`, error);
+        // Continue polling even on error
       }
     }
 
-    console.error('[VideoService] SORA polling timeout after 10 minutes');
+    console.error(`[VideoService] ❌ SORA polling timeout after ${maxAttempts} attempts (${maxAttempts * pollInterval / 1000 / 60} minutes)`);
     return null;
   }
 }

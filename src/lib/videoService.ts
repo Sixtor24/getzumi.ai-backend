@@ -185,47 +185,77 @@ export class VideoGenerationService {
   ): Promise<VideoGenerationResult> {
     console.log('[VideoService] Generating SORA video:', { model, hasImage: !!inputImage });
 
-    const submitPayload: any = {
-      prompt,
-      model: 'sora-2',
-      size: '1280x720',
-      seconds: '10',
-    };
+    try {
+      // SORA requires multipart/form-data
+      const FormData = (await import('form-data')).default;
+      const formData = new FormData();
+      
+      formData.append('prompt', prompt);
+      formData.append('model', 'sora-2');
+      formData.append('size', '1280x720');
+      formData.append('seconds', '10');
 
-    // TODO: Handle input_reference file for Sora
-    // Sora requires multipart/form-data for image input
+      console.log('[VideoService] Submitting to SORA API...');
+      console.log('[VideoService] Request URL:', `${this.baseUrl}/v1/videos`);
 
-    const submitResponse = await fetch(`${this.baseUrl}/v1/videos`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(submitPayload),
-    });
+      const submitResponse = await fetch(`${this.baseUrl}/v1/videos`, {
+        method: 'POST',
+        headers: {
+          'Authorization': this.apiKey,
+          ...formData.getHeaders(),
+        },
+        body: formData as any,
+      });
 
-    if (!submitResponse.ok) {
-      const errorText = await submitResponse.text();
-      console.error('[VideoService] SORA submit error:', errorText);
-      return { success: false, error: 'Failed to submit SORA task' };
-    }
+      console.log('[VideoService] SORA submit response status:', submitResponse.status);
 
-    const submitResult: any = await submitResponse.json();
-    console.log('[VideoService] SORA task submitted:', submitResult);
+      const responseText = await submitResponse.text();
+      console.log('[VideoService] SORA response (first 500 chars):', responseText.substring(0, 500));
 
-    if (!submitResult.video_id) {
-      return { success: false, error: 'Invalid SORA response' };
-    }
+      if (!submitResponse.ok) {
+        console.error('[VideoService] SORA submit error:', responseText);
+        return { success: false, error: `SORA API error: ${submitResponse.status}` };
+      }
 
-    const videoId = submitResult.video_id;
+      // Check if response is HTML
+      if (responseText.trim().startsWith('<!') || responseText.trim().startsWith('<html')) {
+        console.error('[VideoService] SORA returned HTML instead of JSON');
+        return { success: false, error: 'SORA API returned HTML - check API key or endpoint' };
+      }
 
-    // Poll for result
-    const videoUrl = await this.pollSoraTask(videoId);
+      let submitResult: any;
+      try {
+        submitResult = JSON.parse(responseText);
+        console.log('[VideoService] SORA task submitted:', submitResult);
+      } catch (parseError) {
+        console.error('[VideoService] Failed to parse SORA response:', parseError);
+        return { success: false, error: 'Invalid JSON response from SORA API' };
+      }
 
-    if (videoUrl) {
-      return { success: true, videoUrl, taskId: videoId };
-    } else {
-      return { success: false, error: 'Failed to get video from SORA', taskId: videoId };
+      const videoId = submitResult.id || submitResult.video_id;
+      if (!videoId) {
+        console.error('[VideoService] No video ID in SORA response:', submitResult);
+        return { success: false, error: 'Invalid SORA response - no video ID' };
+      }
+
+      console.log('[VideoService] Starting SORA polling:', videoId);
+
+      // Poll for result
+      const videoUrl = await this.pollSoraTask(videoId);
+
+      if (videoUrl) {
+        console.log('[VideoService] SORA video generated successfully:', videoUrl);
+        return { success: true, videoUrl, taskId: videoId };
+      } else {
+        console.error('[VideoService] SORA polling failed to get video URL');
+        return { success: false, error: 'Failed to get video from SORA', taskId: videoId };
+      }
+    } catch (error) {
+      console.error('[VideoService] SORA generation error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'SORA generation failed',
+      };
     }
   }
 

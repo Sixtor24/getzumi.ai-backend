@@ -75,6 +75,10 @@ export class VideoGenerationService {
       }
 
       console.log('[VideoService] Submitting to VEO API...');
+      console.log('[VideoService] Request URL:', `${this.baseUrl}/veo/v1/api/video/submit`);
+      console.log('[VideoService] Request payload:', JSON.stringify(submitPayload, null, 2));
+      console.log('[VideoService] API Key (first 20 chars):', this.apiKey.substring(0, 20) + '...');
+      
       const submitResponse = await fetch(`${this.baseUrl}/veo/v1/api/video/submit`, {
         method: 'POST',
         headers: {
